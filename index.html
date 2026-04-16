@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         :root { --blue: #2563eb; --bg: #f5f6fa; --text: #111827; }
-        body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
+        body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
         .login-card { background: #fff; padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 380px; text-align: center; border: 1px solid #e4e7ef; }
         .logo-icon { width: 64px; height: 64px; background: var(--blue); color: #fff; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.2rem; margin: 0 auto 20px; box-shadow: 0 8px 16px rgba(37,99,235,0.2); }
         h2 { font-size: 1.4rem; font-weight: 900; margin-bottom: 8px; color: var(--text); }
@@ -15,31 +15,24 @@
         input { width: 100%; padding: 14px; margin-bottom: 12px; border: 2px solid #e4e7ef; border-radius: 10px; font-size: 16px; outline: none; box-sizing: border-box; transition: 0.2s; font-weight: 700; }
         input:focus { border-color: var(--blue); }
         button { width: 100%; padding: 15px; background: var(--blue); color: #fff; border: none; border-radius: 10px; font-size: 1rem; font-weight: 700; cursor: pointer; transition: 0.3s; margin-top: 10px; }
-        .sub-link { font-size: 0.8rem; color: #6b7280; margin-top: 20px; cursor: pointer; text-decoration: underline; }
         #errorMsg { color: #dc2626; font-size: 0.85rem; margin-top: 15px; min-height: 20px; font-weight: 600; }
-        .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.8); z-index: 1000; align-items: center; justify-content: center; }
+        .loading { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.8); z-index: 1000; align-items: center; justify-content: center; }
     </style>
 </head>
 <body>
-
-<div id="loader" class="loading-overlay"><div style="font-weight:700;color:var(--blue);">데이터 처리 중...</div></div>
-
+<div id="loader" class="loading"><div style="font-weight:700;color:var(--blue);">AMT 시스템 인증 중...</div></div>
 <div class="login-card">
     <div class="logo-icon">AMT</div>
-    <h2>AMT 관리 시스템</h2>
-    <p>이메일 계정으로 로그인하세요.</p>
+    <h2>AMT 관리자 로그인</h2>
+    <p>본사 관리자 계정으로 접속하세요.</p>
     <input type="email" id="uEmail" placeholder="이메일 주소">
     <input type="password" id="uPw" placeholder="비밀번호" onkeydown="if(event.key==='Enter') doLogin()">
     <button onclick="doLogin()">로그인</button>
-    <div class="sub-link" onclick="sendPwInquiry()">비밀번호를 잊으셨나요?</div>
     <div id="errorMsg"></div>
 </div>
-
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-
     const firebaseConfig = {
         apiKey: "AIzaSyC2jfTHmaguOS9e_ddTvicUZJcvXzQ7EKI",
         authDomain: "amt-ky.firebaseapp.com",
@@ -49,67 +42,33 @@
         messagingSenderId: "1082363760608",
         appId: "1:1082363760608:web:ac27fa51dc23cb603ee585"
     };
-
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getDatabase(app);
-
-    // 텔레그램 하드코딩
-    const MASTER_EMAIL = "kyunghoyou@gmail.com";
-    const ADMIN_EMAIL = "amedtech@gmail.com";
-    const TG = {
-        master: { token: "8615303756:AAEWCz82f6LBzgBx769v1xbUkJ6SOM7rpjk", id: "1988388217" },
-        admin: { token: "8181608888:AAHKJXNbHtoOV4dg5RVxo9dLBJ3LFEUznqE", id: "6249822543" }
-    };
-
-    async function sendTG(msg, target = 'both') {
-        const send = async (t) => {
-            try { await fetch(`https://api.telegram.org/bot${t.token}/sendMessage?chat_id=${t.id}&text=${encodeURIComponent(msg)}`); } catch(e){}
-        };
-        if(target === 'both' || target === 'master') await send(TG.master);
-        if(target === 'both' || target === 'admin') await send(TG.admin);
-    }
-
+    const ADMINS = ['kyunghoyou@gmail.com', 'amedtech@gmail.com'];
     window.doLogin = async () => {
         const email = document.getElementById('uEmail').value.trim();
         const pw = document.getElementById('uPw').value;
         if(!email || !pw) return;
-        
         document.getElementById('loader').style.display = "flex";
-
         try {
-            const userCredential = await signInWithEmailAndPassword(auth, email, pw);
-            const user = userCredential.user;
-
-            if(user.email === MASTER_EMAIL) {
-                const otp = Math.floor(100000 + Math.random() * 900000);
-                await set(ref(db, 'amt_otp/current'), { code: otp, time: Date.now() });
-                await sendTG(`[AMT 보안] 총괄관리자 로그인 인증번호: [${otp}]`, 'master');
-                alert("총괄관리자 텔레그램으로 OTP가 발송되었습니다.");
-            }
-            route(user.email);
+            await signInWithEmailAndPassword(auth, email, pw);
         } catch (e) {
             document.getElementById('loader').style.display = "none";
             document.getElementById('errorMsg').innerText = "로그인 정보가 틀립니다.";
-            await sendTG(`[로그인 실패]\n계정: ${email}\n내용: 접속 시도 실패`);
         }
     };
-
-    window.sendPwInquiry = async () => {
-        const email = document.getElementById('uEmail').value.trim();
-        if(!email) { alert("이메일을 입력 후 눌러주세요."); return; }
-        await sendTG(`[비밀번호 문의]\n계정: ${email}\n관리자님, 비밀번호 확인 바랍니다.`, 'both');
-        alert("관리자에게 비밀번호 확인 요청을 보냈습니다.");
-    };
-
-    function route(email) {
-        if (email === MASTER_EMAIL || email === ADMIN_EMAIL) location.replace("orders-admin-ky.html");
-        else location.replace("index-ky.html");
-    }
-
     onAuthStateChanged(auth, (user) => {
-        if (user) route(user.email);
-        else document.getElementById('loader').style.display = "none";
+        if (user) {
+            if (ADMINS.includes(user.email)) {
+                location.replace("orders-admin-amt.html");
+            } else {
+                alert("본사 관리자 권한이 없습니다.");
+                auth.signOut();
+                location.reload();
+            }
+        } else {
+            document.getElementById('loader').style.display = "none";
+        }
     });
 </script>
 </body>
