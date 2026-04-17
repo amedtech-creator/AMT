@@ -4,27 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AMT 본사 로그인</title>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
-        :root { --blue: #2563eb; --bg: #f5f6fa; --text: #111827; }
-        body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-        .login-card { background: #fff; padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 380px; text-align: center; border: 1px solid #e4e7ef; }
-        .logo-icon { width: 64px; height: 64px; background: var(--blue); color: #fff; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.2rem; margin: 0 auto 20px; }
-        h2 { font-size: 1.4rem; font-weight: 900; margin-bottom: 8px; color: var(--text); }
-        input { width: 100%; padding: 14px; margin-bottom: 12px; border: 2px solid #e4e7ef; border-radius: 10px; font-size: 16px; outline: none; box-sizing: border-box; font-weight: 700; }
-        input:focus { border-color: var(--blue); }
-        button { width: 100%; padding: 15px; background: var(--blue); color: #fff; border: none; border-radius: 10px; font-size: 1rem; font-weight: 700; cursor: pointer; }
-        #errorMsg { color: #dc2626; font-size: 0.85rem; margin-top: 15px; font-weight: 600; min-height: 20px; }
+        body { font-family: sans-serif; background: #f5f6fa; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: #fff; padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 350px; text-align: center; }
+        input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
     </style>
 </head>
 <body>
-<div class="login-card">
-    <div class="logo-icon">AMT</div>
-    <h2>본사 로그인</h2>
-    <input type="email" id="uEmail" placeholder="이메일 주소">
-    <input type="password" id="uPw" placeholder="비밀번호" onkeydown="if(event.key==='Enter') doLogin()">
+<div class="card">
+    <h2>AMT 본사 로그인</h2>
+    <input type="email" id="uEmail" placeholder="이메일">
+    <input type="password" id="uPw" placeholder="비밀번호">
     <button onclick="doLogin()">로그인</button>
-    <div id="errorMsg"></div>
 </div>
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -32,7 +24,6 @@
     const firebaseConfig = {
         apiKey: "AIzaSyC2jfTHmaguOS9e_ddTvicUZJcvXzQ7EKI",
         authDomain: "amt-ky.firebaseapp.com",
-        databaseURL: "https://amt-ky-default-rtdb.asia-southeast1.firebasedatabase.app",
         projectId: "amt-ky",
         storageBucket: "amt-ky.firebasestorage.app",
         messagingSenderId: "1082363760608",
@@ -41,20 +32,13 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const ADMINS = ['kyunghoyou@gmail.com', 'amedtech@gmail.com'];
-    window.doLogin = async () => {
-        const email = document.getElementById('uEmail').value.trim();
+    window.doLogin = () => {
+        const email = document.getElementById('uEmail').value;
         const pw = document.getElementById('uPw').value;
-        if(!email || !pw) return;
-        try {
-            await signInWithEmailAndPassword(auth, email, pw);
-        } catch (e) {
-            document.getElementById('errorMsg').innerText = "이메일 또는 비밀번호가 틀립니다.";
-        }
+        signInWithEmailAndPassword(auth, email, pw).catch(e => alert("정보가 틀립니다."));
     };
     onAuthStateChanged(auth, (user) => {
-        if (user && ADMINS.includes(user.email)) {
-            location.replace("orders-admin-amt.html");
-        }
+        if (user && ADMINS.includes(user.email)) location.replace("orders-admin-amt.html");
     });
 </script>
 </body>
