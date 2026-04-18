@@ -17,8 +17,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&amp;family=JetBrains+Mono:wght@400;600;700&amp;display=swap" rel="stylesheet">
 
-<script type='text/javascript' src='https://www.genspark.ai/u76xjchYq7tGedAX9m9y5sJO7siPvEFo4_tNJ1I0eK2fdIlGl4Ip_iIsdY8GHNCZMVKQ5J_k30wIsXPleHmmm-sh78L5_sYtUyN3ZxSNeD51jEV_CUi0M7SFYb-YuZICEflo-IGGlFVYfSq7_Fb5-VaBga24otyorLMg3Fr6QlA5ZTxIF8O1Bjr_akmGZjWQ823ek92VDEMb5StUn0hudAKZRoaRrTgDUH2ULEiweW1a-UtNzLuJms-0J9ExYE3BMVVFp-YXuokQ8gk9G_AhgMhuqZ6s0x00rTOC9x_CDKrxzHDiYDFZGdjQ0ICr8OoXhjsKCEZZgXigfFuKPs67kx5SO1DZailcTlehRoZrWoMLRZfSIl5R6jTGQgHjYs423Ekwe2-9NOmjG7Dd_uahWvcGyFOMG125GnFizHwERb-04QMsBscfqXf_QIM-j5fsm9a9TxA5Wx67CxhOYSr3kjUAbk5PICQIWZT3NRu09zo9FZVjILJU0dRNGyDHG0H_FiukGXcxI-C2w64dYDTTKVTTl1WfxtRpd_zQ4CBYfADJp3z0JZaJ75gk8VTXEuKdFTLF46qgZpuOKAJ8m41ZOLS2s_zvuSEAvwHj3sCR-BLY8EtDxpfcvgV8ctxYsuNOcXOy9Eo5rH7-7wlilzclGJT8SUEw1yeK49KrWbeYFIBAkXBsVcrPxQdJyAjSDzsPXhZw7goHeQUoEiG3'></script><script type="text/javascript" src="https://www.genspark.ai/J4FTzbXqhO8UkVitMql3fgdlLz8hBMYh0iIT5ymh0L2LI72fcDq9mPnSdjNIYEVIras16wO6HVuYNUWkDwywIxl4btgMiRyhBfygxg_y5-GLic98g5u4eJ2X-SL341na8svYkkUn-TwX4pljOaLCMJWGa4DGTmmwhJW7Q4ZoHLNT_d8ze4SXhBiqEGZsc5EZwhxv27TznHyGpeb9icZQROHgW8XvlrpyTYOJucgPp9Mx5UE7D4RWNle7VHcYyDUsdiSDighWe75gDG6dDg-5S1dB2w731V5z9CdEu3qOcx6n9yepS1eOIunneNkA4yGKnMLpqQClo6jWGmVMUp6xOX00jusJfKvABhdcklCp6MQRuNMp3qItOg2n2Rv5qk01rsGkOkdWBZJLJSm3A1aeLfgUf0AZqm3sgbiiWSC3eMmGwI22Hj-agvYDx4KwpYwAiQxB8cuzGTk5PPUAWUubBMatDItDue8rzNIbt7EBdOdWKj5E1PXSCQBkdi40vLSOIOh4do-SWg5YxY6pfSUUQ9CMsDhWrIHT2NOia5Yx4krYpwKm9f7bFTdJT_iRQV8YnAn1CT3ij8eGuYWVASlHm9bQWEU6KivR5EMHFaZeyxLy5AhlxjtrL6BN9S71TryQeQi6Pv-R_XkPb2gKZHDmbnLTitbS1is3Cf-VpBcyUISVH43a245ho5wEqQH3ecsmtdk"></script><script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+<script type="module">
+  import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { getDatabase, ref, set, get, onValue, off, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
   // ★ Firebase 설정 하드코딩 — 어느 기기에서든 자동 연결
@@ -45,16 +46,26 @@
       localStorage.setItem('amt_firebase_cfg', JSON.stringify(DEFAULT_FB_CFG));
   } catch(e){}
 
-  let app, db, firebaseReady = false;
+  let app, db, auth, firebaseReady = false;
   try {
-    app = initializeApp({
+    const appName = 'amt-order';
+    app = getApps().find(a => a.name === appName) || initializeApp({
       apiKey: savedCfg.apiKey, authDomain: savedCfg.authDomain,
       projectId: savedCfg.projectId, storageBucket: savedCfg.storageBucket,
       messagingSenderId: savedCfg.messagingSenderId, appId: savedCfg.appId,
       databaseURL: savedCfg.databaseURL
-    });
+    }, appName);
     db = getDatabase(app);
+    auth = getAuth(app);
     firebaseReady = true;
+    // ★ Auth 상태 감지 — 로그아웃 시 로그인 페이지로
+    onAuthStateChanged(auth, (user) => {
+      console.log('[AMT admin] Auth 상태:', user ? user.email : 'null');
+      if(!user){
+        sessionStorage.removeItem('amt_auth_session');
+        setTimeout(()=>location.replace('index-AMT.html'), 300);
+      }
+    });
   } catch(e){ console.warn('Firebase init failed', e); }
   window._fb = { db, ref, set, get, onValue, off, remove, ready: firebaseReady };
 </script>
@@ -7122,7 +7133,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260418-v5')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260418-v6')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });

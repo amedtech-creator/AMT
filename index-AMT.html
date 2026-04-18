@@ -34,7 +34,6 @@
   </style>
   <!-- EmailJS -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script>emailjs.init('YOUR_EMAILJS_PUBLIC_KEY');</script>
 </head>
 <body>
 <div class="card">
@@ -107,7 +106,7 @@ const SESSION_KEY = 'amt_auth_session';
 const SAVED_EMAIL = 'amt_saved_email';
 const SAVED_PW    = 'amt_saved_pw';
 
-const app  = getApps().find(a=>a.name==='amt-login') || initializeApp(FB_CFG, 'amt-login');
+const app  = getApps().find(a=>a.name==='amt-order') || initializeApp(FB_CFG, 'amt-order');
 const auth = getAuth(app);
 const db   = getDatabase(app);
 
