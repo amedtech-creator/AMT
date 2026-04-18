@@ -2127,7 +2127,7 @@ function init(){
   // Firebase 자동 동기화 + 일 1회 자동 백업 + 비밀번호 자동동기화
   const fb=window._fb;
   if(fb&&fb.ready){
-    fbSync().then(()=>{ fbStartListener(); fbBackupToday(); autoSyncWithSavedPassword(); });
+    fbSync().then(()=>{ fbStartListener(); fbBackupToday(); });
   }
   // 저장된 비밀번호 입력칸에 채우기 + 배너 표시
   loadSyncPasswordUI();
@@ -5249,7 +5249,6 @@ async function saveSyncPassword(){
   msg.textContent = '✅ 비밀번호가 저장되었습니다. 앱을 열 때마다 자동으로 동기화됩니다.';
   msg.style.color = 'var(--green)';
   // 저장 즉시 한 번 동기화 실행
-  await autoSyncWithSavedPassword();
 }
 
 // 비밀번호 삭제
