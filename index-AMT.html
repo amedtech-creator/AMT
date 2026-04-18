@@ -31,6 +31,10 @@
     .remember-row input{width:auto;}
     .remember-row label{margin:0;font-weight:400;color:var(--gray);}
     .otp-input{font-size:1.4rem!important;font-weight:800!important;letter-spacing:8px!important;text-align:center!important;}
+    .btn.loading{opacity:.6;cursor:not-allowed;position:relative}
+    .btn.loading::after{content:'';position:absolute;top:50%;left:50%;width:16px;height:16px;margin-top:-8px;margin-left:-8px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .btn.loading .btn-text{opacity:0}
   </style>
   <!-- EmailJS -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
@@ -60,7 +64,7 @@
       <input type="checkbox" id="rememberMe" checked>
       <label for="rememberMe">이 기기에서 자동 로그인</label>
     </div>
-    <button class="btn btn-primary" onclick="doLogin()">로그인</button>
+    <button class="btn btn-primary" id="loginBtn" onclick="doLogin()"><span class="btn-text">로그인</span></button>
     <div class="msg" id="loginMsg"></div>
   </div>
 
@@ -76,7 +80,7 @@
       <input type="text" id="otpInput" class="otp-input" placeholder="000000" maxlength="6" inputmode="numeric"
         onkeydown="if(event.key==='Enter')verifyOtp()">
     </div>
-    <button class="btn btn-primary" onclick="verifyOtp()">인증 확인</button>
+    <button class="btn btn-primary" id="verifyBtn" onclick="verifyOtp()"><span class="btn-text">인증 확인</span></button>
     <button class="btn btn-secondary" onclick="resendOtp()">인증코드 재발송</button>
     <div class="msg" id="verifyMsg"></div>
     <div class="hint" id="verifyTimer"></div>
@@ -141,21 +145,35 @@ window.doLogin = async () => {
   if(!email||!pw){ showMsg('loginMsg','이메일과 코드번호를 입력하세요','error'); return; }
   if(!ADMINS[email]){ showMsg('loginMsg','등록된 관리자 이메일이 아닙니다','error'); return; }
 
-  showMsg('loginMsg','로그인 중...','');
+  // ★ 로딩 시작 - 버튼 비활성화 + 스피너
+  const btn = document.getElementById('loginBtn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  showMsg('loginMsg','🔐 인증 중...','');
+
   try {
     await signInWithEmailAndPassword(auth, email, pw);
-    // onAuthStateChanged에서 이어서 처리됨
+    showMsg('loginMsg','✅ 인증 성공! 이동 중...','success');
+    // onAuthStateChanged에서 이어서 처리됨 (스피너는 유지해서 화면 이동 전까지 깜박임 방지)
   } catch(e){
+    btn.classList.remove('loading');
+    btn.disabled = false;
     const c=e.code||'';
-    if(c.includes('wrong-password')||c.includes('invalid-credential')) showMsg('loginMsg','코드번호가 틀립니다','error');
-    else if(c.includes('user-not-found')) showMsg('loginMsg','등록되지 않은 이메일입니다','error');
-    else if(c.includes('too-many-requests')) showMsg('loginMsg','잠시 후 다시 시도하세요','error');
-    else showMsg('loginMsg','로그인 실패: '+e.message,'error');
+    if(c.includes('wrong-password')||c.includes('invalid-credential')) showMsg('loginMsg','❌ 코드번호가 틀립니다','error');
+    else if(c.includes('user-not-found')) showMsg('loginMsg','❌ 등록되지 않은 이메일입니다','error');
+    else if(c.includes('too-many-requests')) showMsg('loginMsg','⏳ 잠시 후 다시 시도하세요','error');
+    else showMsg('loginMsg','❌ 로그인 실패: '+e.message,'error');
   }
 };
 
 // ─── OTP 생성 및 발송 ──────────────────────────────────────
 async function sendOtp(email){
+  // ★ 화면 즉시 전환 - 사용자에게 진행감 제공
+  document.getElementById('loginBox').style.display  = 'none';
+  document.getElementById('verifyBox').style.display = 'block';
+  document.getElementById('otpInput').value = '';
+  document.getElementById('verifyDesc').textContent = '📤 인증코드 발송 중...';
+
   const code = String(Math.floor(100000+Math.random()*900000));
   _pendingEmail   = email;
   _pendingOtpCode = code;
@@ -186,12 +204,8 @@ async function sendOtp(email){
   }catch(e){ console.warn('이메일 발송 실패',e); }
 
   document.getElementById('verifyDesc').textContent =
-    sent ? `${email} 로 인증코드를 발송했습니다`
-         : `인증코드: ${code}`;
-
-  document.getElementById('loginBox').style.display  = 'none';
-  document.getElementById('verifyBox').style.display = 'block';
-  document.getElementById('otpInput').value = '';
+    sent ? `✉️ ${email} 로 인증코드를 발송했습니다`
+         : `⚠️ 이메일 발송 실패 - 개발자도구에 코드 표시: ${code}`;
   startOtpTimer();
 }
 
@@ -201,6 +215,11 @@ window.verifyOtp = async () => {
   if(!input){ showMsg('verifyMsg','코드를 입력하세요','error'); return; }
   if(Date.now()>_otpExpiry){ showMsg('verifyMsg','만료됐습니다. 재발송하세요','error'); return; }
 
+  const vbtn = document.getElementById('verifyBtn');
+  vbtn.classList.add('loading');
+  vbtn.disabled = true;
+  showMsg('verifyMsg','🔐 검증 중...','');
+
   let ok = false;
   try{
     const snap = await get(ref(db,'amt_otp/'+btoa(_pendingEmail).replace(/=/g,'')));
@@ -208,7 +227,12 @@ window.verifyOtp = async () => {
     ok = s && s.code===input && Date.now()<=s.expiry;
   }catch(e){ ok = input===_pendingOtpCode; }
 
-  if(!ok){ showMsg('verifyMsg','인증코드가 틀리거나 만료됐습니다','error'); return; }
+  if(!ok){
+    vbtn.classList.remove('loading');
+    vbtn.disabled = false;
+    showMsg('verifyMsg','❌ 인증코드가 틀리거나 만료됐습니다','error');
+    return;
+  }
 
   clearInterval(_timerInterval);
   const user = auth.currentUser;

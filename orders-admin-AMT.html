@@ -60,12 +60,20 @@
     db = getDatabase(app);
     auth = getAuth(app);
     firebaseReady = true;
-    // ★ Auth 상태 감지 — 로그아웃 시 로그인 페이지로
+    // ★ Auth 상태 감지 — 초기화 후 실제 로그아웃 시에만 리다이렉트
+    let _authInitialized = false;
     onAuthStateChanged(auth, (user) => {
       console.log('[AMT admin] Auth 상태:', user ? user.email : 'null');
+      if(!_authInitialized){ _authInitialized = true; return; }
       if(!user){
-        sessionStorage.removeItem('amt_auth_session');
-        setTimeout(()=>location.replace('index-AMT.html'), 300);
+        const sess = sessionStorage.getItem('amt_auth_session');
+        if(!sess) return;
+        setTimeout(() => {
+          if(!auth.currentUser){
+            sessionStorage.removeItem('amt_auth_session');
+            location.replace('index-AMT.html');
+          }
+        }, 1000);
       }
     });
   } catch(e){ console.warn('Firebase init failed', e); }
@@ -594,7 +602,8 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
     <div class="logo-text"><span>AMT</span> · KY 관리시스템</div>
   </div>
   <div class="header-right">
-    <span class="admin-name-chip" id="amtAdminBadge">👤 ─</span>
+    <span class="admin-name-chip" id="amtAdminBadge" onclick="amtAdminLogout()" title="클릭하면 로그아웃됩니다" style="cursor:pointer">👤 ─</span>
+    <span id="amtNotifChip" onclick="toggleNotifPanel()" title="전체 알림 보기" style="display:none;cursor:pointer;background:#ef4444;color:#fff;padding:3px 10px;border-radius:12px;font-size:.75rem;font-weight:700;margin-left:4px">🔔 0</span>
     <div class="sync-badge">
       <div class="sync-dot off pulse" id="syncDot"></div>
       <span id="syncLabel">로컬모드</span>
@@ -603,6 +612,18 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
     <button class="btn btn-ghost btn-sm" onclick="triggerImport()">📥 가져오기</button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
   </div>
+</div>
+
+<!-- ★ 전체 알림 패널 -->
+<div id="amtNotifPanel" style="display:none;position:fixed;top:64px;right:16px;width:380px;max-width:92vw;max-height:70vh;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9997;overflow:hidden;flex-direction:column">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:#f8f9fc">
+    <span style="font-weight:700;font-size:.95rem">🔔 전체 알림</span>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="clearAllAmtNotif()" style="font-size:.72rem;padding:4px 10px">🗑 모두 삭제</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleNotifPanel()" style="font-size:.72rem;padding:4px 10px">✕ 닫기</button>
+    </div>
+  </div>
+  <div id="amtNotifListContent" style="overflow-y:auto;flex:1;padding:4px 0;max-height:calc(70vh - 60px)"></div>
 </div>
 
 <!-- NAV -->
@@ -1312,6 +1333,25 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
 
     <div id="kyOrdersList" style="display:none"></div>
   </div>
+
+  <!-- ★ 월별 주문 히스토리 (1년간 보관, 총괄관리자만 삭제) -->
+  <div class="card" style="margin-top:14px">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-dot" style="background:var(--blue)"></div>
+        📋 월별 주문 히스토리
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="month" id="kyHistMonth" onchange="kyRenderHistory()"
+               style="padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:.82rem">
+        <button class="btn btn-ghost btn-sm" onclick="kyRenderHistory()">🔄 새로고침</button>
+      </div>
+    </div>
+    <div style="font-size:.72rem;color:var(--text3);margin-bottom:10px">
+      ※ 출고 완료된 주문 기록입니다. 1년 이상 지난 주문은 자동으로 삭제됩니다.
+    </div>
+    <div id="kyHistList"></div>
+  </div>
 </div>
 
 <!-- KY 주문 처리 모달 -->
@@ -1466,42 +1506,40 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
 
     <hr class="divider">
     <div class="setting-section">
-      <h3>👤 관리자 코드 관리</h3>
-      <div id="adminCodeSuperNote" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:.78rem;color:#713f12">
-        🔑 총관리자 전용 — 모든 관리자 코드를 확인하고 수정할 수 있습니다.
+      <h3>👤 관리자 이메일/코드 관리</h3>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:.78rem;color:#1e40af">
+        📧 <b>이메일 + 코드번호</b>로 로그인합니다. 입력 시 Firebase Authentication 계정이 자동 생성됩니다.
       </div>
       <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
-        본인 코드를 수정하거나 총관리자는 모든 코드를 관리할 수 있습니다.
+        · 총괄관리자: 전체 조회 가능<br>
+        · 일반관리자: 본인 코드만 조회, 다른 관리자는 마스킹 표시
       </p>
       <button class="btn btn-outline btn-sm" onclick="loadAdminCodes()" style="margin-bottom:12px">🔄 목록 불러오기</button>
-      <div id="adminCodeListWrap" style="margin-bottom:14px;max-height:220px;overflow-y:auto"></div>
-      <!-- 신규 추가 -->
-      <div style="background:var(--surface2);border-radius:8px;padding:12px;border:1px solid var(--border)">
-        <div style="font-size:.78rem;font-weight:700;margin-bottom:8px;color:var(--text2)">+ 새 관리자 추가</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <input type="text" id="newAdminName" placeholder="이름" style="flex:1;min-width:90px">
-          <input type="text" id="newAdminCode" placeholder="코드 (숫자)" style="flex:1;min-width:90px">
+      <div id="adminCodeListWrap" style="margin-bottom:14px;max-height:260px;overflow-y:auto"></div>
+      <!-- 신규 추가 - 총괄관리자만 -->
+      <div id="addAdminBox" style="display:none;background:var(--surface2);border-radius:8px;padding:12px;border:1px solid var(--border)">
+        <div style="font-size:.78rem;font-weight:700;margin-bottom:8px;color:var(--text2)">+ 새 관리자 추가 (총괄관리자 전용)</div>
+        <div style="display:grid;grid-template-columns:1.2fr 1.5fr 1fr auto;gap:8px;align-items:center">
+          <input type="text" id="newAdminName" placeholder="이름 (예: 홍길동)">
+          <input type="email" id="newAdminEmail" placeholder="이메일 (example@gmail.com)">
+          <input type="text" id="newAdminCode" placeholder="코드번호 (6자리)">
           <button class="btn btn-primary btn-sm" onclick="addAdminCode()">+ 추가</button>
         </div>
-      </div>
-      <div style="margin-top:12px;padding:10px 12px;background:var(--yellow-light);border-radius:8px;border:1px solid #fcd34d;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <span style="font-size:.78rem;color:#92400e">코드를 모르는 경우 관리자에게 승인 요청을 보내세요</span>
-        <button class="btn btn-sm" style="background:#d97706;color:#fff;border:none" onclick="requestCodeChange(&#39;관리자&#39;)">📧 승인 요청 메일</button>
+        <div style="font-size:.7rem;color:var(--text3);margin-top:8px">※ Firebase Auth에 자동 등록됩니다</div>
       </div>
     </div>
 
     <hr class="divider">
     <div class="setting-section">
-      <h3>🏢 대리점 코드 관리</h3>
+      <h3>🏢 대리점 이메일/코드 관리</h3>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:.78rem;color:#1e40af">
+        📧 <b>이메일 + 6자리 코드번호</b>로 로그인합니다. <b>관리자만 변경 가능</b>합니다. 대리점 관리 탭에서 등록하면 여기에도 자동 반영됩니다.
+      </div>
       <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
-        대리점 로그인 시 사용하는 코드입니다. 코드 변경 시 대리점에 새 코드를 알려주세요.
+        · 총괄관리자 + 일반관리자 모두 대리점 코드 조회/변경 가능 (일반 대리점은 본인 것만 조회)
       </p>
       <button class="btn btn-outline btn-sm" onclick="loadDealerCodes()" style="margin-bottom:12px">🔄 목록 불러오기</button>
-      <div id="dealerCodeListWrap" style="margin-bottom:12px;max-height:220px;overflow-y:auto"></div>
-      <div style="margin-top:8px;padding:10px 12px;background:var(--yellow-light);border-radius:8px;border:1px solid #fcd34d;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <span style="font-size:.78rem;color:#92400e">코드를 모르는 경우 승인 요청을 보내세요</span>
-        <button class="btn btn-sm" style="background:#d97706;color:#fff;border:none" onclick="requestCodeChange(&#39;대리점&#39;)">📧 승인 요청 메일</button>
-      </div>
+      <div id="dealerCodeListWrap" style="margin-bottom:12px;max-height:280px;overflow-y:auto"></div>
     </div>
 
     <!-- ★ 총관리자 전용: 수입가격 입력 (VAT 계산용) -->
@@ -1946,7 +1984,7 @@ function ym(ds){ return String(ds||'').slice(0,7); }
 function ymd(){ return fmtDateLocal(new Date()); }
 function orderAmount(o){ return (Number(o&&o.total)||0) + (Number(o&&o.fee)||0); }
 
-/* ─── 대한민국 공휴일 (토요일/공휴일이면 전날 영업일로 조정) ───
+/* ─── 대한민국 공휴일 (토/일/공휴일이면 "다음 영업일"로 수금일 조정, KST 기준) ───
    대체공휴일 포함. 매년 고정 + 음력계산 없이 주요 날짜 하드코딩.
    필요 시 연도 추가 가능. ─────────────────────────────────── */
 const KR_HOLIDAYS = new Set([
@@ -1982,19 +2020,19 @@ function isNonBizDay(ds){
   return false;
 }
 
-// 말일 기준으로 토요일/공휴일이면 하루씩 앞으로 당김 (영업일 찾기)
-function prevBizDay(ds){
+// 말일 기준으로 토/일/공휴일이면 하루씩 뒤로 → 다음 영업일 반환
+function nextBizDay(ds){
   let cur = ds;
   while(isNonBizDay(cur)){
-    cur = addDays(cur, -1);
+    cur = addDays(cur, 1);
   }
   return cur;
 }
 
-// eom: 말일 계산 후 토요일/공휴일 조정
+// eom: 말일이 토/일/공휴일이면 "다음 영업일"로 조정 (KST 기준)
 function eomBiz(y, m){
   const lastDay = eom(y, m);
-  return prevBizDay(lastDay);
+  return nextBizDay(lastDay);
 }
 
 function calcDue(orderDate, term, dealerId){
@@ -2008,7 +2046,7 @@ function calcDue(orderDate, term, dealerId){
   switch(term){
     case 'same':      return orderDate;
     case 'same_next': return orderDate; // 보수적: 당일
-    case 'eom':       return eomBiz(y, m);           // 말일 → 토/공휴일이면 전날
+    case 'eom':       return eomBiz(y, m);           // 말일 → 토/일/공휴일이면 다음 영업일
     case 'eom_next':  return m===12 ? eomBiz(y+1,1) : eomBiz(y, m+1); // 다음달 말일 동일 적용
     default:          return orderDate;
   }
@@ -2246,7 +2284,20 @@ function oCalcTotal(){
   setInputFmt(document.getElementById('oTotal'), q*p);
 }
 
+let _savingOrder = false;
 async function saveOrder(){
+  if(_savingOrder) return; // ★ 이중 실행 방지 (더블클릭 대응)
+  _savingOrder = true;
+  const saveBtn = document.querySelector('button[onclick="saveOrder()"]');
+  if(saveBtn) saveBtn.disabled = true;
+  try{
+    await _doSaveOrder();
+  } finally {
+    _savingOrder = false;
+    if(saveBtn) saveBtn.disabled = false;
+  }
+}
+async function _doSaveOrder(){
   const orderDate=document.getElementById('oDate').value;
   const dealerId=document.getElementById('oDealer').value;
   const product=document.getElementById('oProduct').value;
@@ -2289,10 +2340,12 @@ async function saveOrder(){
   if(fb && fb.ready){
     try{
       const kyOrderId = 'ky_from_amt_' + order.id;
+      const nowIso = new Date().toISOString();
       const kyOrder = {
         id: kyOrderId,
         dealerId: order.dealerId,
         dealerName: order.dealerName,
+        dealerEmail: (dealer.email||'').toLowerCase(),  // ★ 대리점 필터링용
         items: [{
           product: order.product,
           qty: order.qty,
@@ -2308,15 +2361,17 @@ async function saveOrder(){
         orderDate: order.orderDate,
         status: 'shipped',
         statusNote: 'AMT 직접 발주 입력',
-        statusUpdatedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        statusUpdatedAt: nowIso,
+        updatedAt: nowIso,
         memo: order.memo||'',
         createdAt: order.createdAt,
         processedBy: window._amtAdminName||'─',
         fromAmt: true,
-        relAmtOrder: order.id
+        relAmtOrder: order.id,
+        movedToHistoryAt: nowIso  // ★ 바로 히스토리 처리
       };
-      await fb.set(fb.ref(fb.db,'ky_orders/'+kyOrderId), kyOrder);
+      // ★ 바로 히스토리에 저장 (대리점에 "출고완료"로 표시)
+      await fb.set(fb.ref(fb.db,'ky_orders_history/'+kyOrderId), kyOrder);
       await markKyMutation('create_from_amt', kyOrderId, { relAmtOrder: order.id, dealerId: order.dealerId });
       order.relKyOrder = kyOrderId;
       order.relKyProduct = product;
@@ -4254,6 +4309,28 @@ async function ensureDealerAuthAccount(email, code){
   return true;
 }
 
+// ★ 관리자/대리점 공통 Auth 계정 생성 헬퍼 (window._firebaseHelpers.ensureAuthAccount로 노출)
+async function ensureAuthAccount(email, code, displayName){
+  if(!email || !code) return false;
+  const H = window._firebaseHelpers;
+  if(!H) throw new Error('Firebase 도우미 미초기화');
+  const auxAuth = getDealerAuxAuth();
+  try{
+    const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
+    if(methods && methods.length > 0){
+      console.log('[Auth] 기존 계정 존재:', email);
+      return true; // 이미 존재 (비밀번호 변경은 불가)
+    }
+  }catch(e){ console.warn('이메일 조회 실패', e); }
+  await H.createUserWithEmailAndPassword(auxAuth, email, code);
+  console.log('[Auth] 계정 생성 완료:', email, displayName||'');
+  return true;
+}
+// 전역 노출
+if(window._firebaseHelpers){
+  window._firebaseHelpers.ensureAuthAccount = ensureAuthAccount;
+}
+
 async function saveDealer(){
   await requireOtp('대리점 저장/수정', async () => { await _doSaveDealer(); });
 }
@@ -4771,11 +4848,64 @@ function migrateDueDates(){
 async function fbSaveAll(){
   const fb=window._fb; if(!fb||!fb.ready) return;
   const now=new Date().toISOString();
+
+  // ★ [질문 11 해결] 저장 전 원격 최신 타임스탬프 확인
+  // 만약 원격이 로컬보다 최신이면 → 원격 데이터 먼저 반영 후 병합 저장 (과거 데이터가 최신을 덮어쓰는 문제 방지)
+  try{
+    const remoteSnap = await fb.get(fb.ref(fb.db,'amt_data/_updatedAt'));
+    const remoteTime = remoteSnap.exists() ? remoteSnap.val() : '';
+    const localTime = localStorage.getItem('amt_updatedAt') || '';
+    if(remoteTime && localTime && remoteTime > localTime){
+      // 서버가 더 최신 - 서버 데이터 먼저 가져와서 병합
+      console.warn('[동기화] 서버가 더 최신입니다. 병합 저장 시도... 원격:', remoteTime, '로컬:', localTime);
+      const fullSnap = await fb.get(fb.ref(fb.db,'amt_data'));
+      if(fullSnap.exists()){
+        const remote = fullSnap.val();
+        // 로컬의 최근 변경사항을 원격 기준으로 병합
+        _mergeRemoteIntoLocal(remote);
+      }
+    }
+  }catch(e){ console.warn('[동기화] 원격 확인 실패, 그대로 저장 진행:', e); }
+
   const payload={ orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs, bestReturns, kyReturns, importPrices:(typeof importPrices!=='undefined'?importPrices:{}), _updatedAt:now };
   try{
     await fb.set(fb.ref(fb.db,'amt_data'), payload);
+    localStorage.setItem('amt_updatedAt', now); // ★ 저장 후 로컬 타임스탬프 갱신
     setLastSync(now);
   }catch(e){ console.warn('FB save err',e); }
+}
+
+// ★ [질문 11] 서버 데이터를 로컬에 병합 (로컬 신규 데이터는 유지, 서버에만 있는 것은 추가)
+function _mergeRemoteIntoLocal(remote){
+  // orders: id 기준으로 병합 (로컬에 이미 있는 것은 로컬 유지)
+  if(remote.orders && Array.isArray(remote.orders)){
+    const localIds = new Set(orders.map(o=>o.id));
+    remote.orders.forEach(ro => {
+      if(!localIds.has(ro.id)) orders.push(ro);
+    });
+  }
+  if(remote.invLogs && Array.isArray(remote.invLogs)){
+    const localIds = new Set(invLogs.map(i=>i.id));
+    remote.invLogs.forEach(ri => {
+      if(!localIds.has(ri.id)){ if(!ri.company) ri.company='AMT'; invLogs.push(ri); }
+    });
+  }
+  // dealers, products: 배열이지만 관리자 수정이므로 원격 기준
+  if(remote.dealers) dealers = remote.dealers;
+  if(remote.products) products = remote.products;
+  if(remote.internalTrades && Array.isArray(remote.internalTrades)){
+    const localIds = new Set(internalTrades.map(t=>t.id));
+    remote.internalTrades.forEach(r => { if(!localIds.has(r.id)) internalTrades.push(r); });
+  }
+  if(remote.auditLogs && Array.isArray(remote.auditLogs)){
+    const localIds = new Set(auditLogs.map(l=>l.id));
+    remote.auditLogs.forEach(r => { if(!localIds.has(r.id)) auditLogs.push(r); });
+  }
+  if(remote.txLogs && Array.isArray(remote.txLogs)){
+    const localIds = new Set(txLogs.map(l=>l.id));
+    remote.txLogs.forEach(r => { if(!localIds.has(r.id)) txLogs.push(r); });
+  }
+  saveLS();
 }
 
 // 개별 호출 래퍼 (기존 코드 호환 유지 - 실제로는 전체 저장)
@@ -5747,6 +5877,98 @@ function initKyAdmin(){
   }
   kySetSync(true, '연결됨');
   kyStartListener();
+  // ★ 월별 히스토리 초기화
+  try{
+    const now = new Date();
+    const mo = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+    const histInput = document.getElementById('kyHistMonth');
+    if(histInput && !histInput.value) histInput.value = mo;
+  }catch(e){}
+  kyPurgeOldHistory().catch(()=>{});
+  kyRenderHistory();
+}
+
+/* ═══ KY 주문 히스토리 ═══ */
+async function kyPurgeOldHistory(){
+  const fb = window._fb;
+  if(!fb || !fb.ready) return;
+  try{
+    const snap = await fb.get(fb.ref(fb.db, 'ky_orders_history'));
+    if(!snap.exists()) return;
+    const all = snap.val() || {};
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    const cutoff = oneYearAgo.toISOString();
+    const toDelete = [];
+    Object.entries(all).forEach(([id, o]) => {
+      const stamp = o && (o.movedToHistoryAt || o.statusUpdatedAt || o.createdAt || '');
+      if(stamp && stamp < cutoff) toDelete.push(id);
+    });
+    for(const id of toDelete){
+      try{ await fb.set(fb.ref(fb.db, 'ky_orders_history/'+id), null); }catch(e){}
+    }
+    if(toDelete.length) console.log('[KY 히스토리] 1년 경과 '+toDelete.length+'건 자동 삭제');
+  }catch(e){ console.warn('히스토리 자동삭제 실패:', e); }
+}
+
+async function kyRenderHistory(){
+  const fb = window._fb;
+  const el = document.getElementById('kyHistList');
+  if(!el) return;
+  if(!fb || !fb.ready){ el.innerHTML = '<div style="padding:20px;text-align:center;color:#888">Firebase 미연결</div>'; return; }
+  const monthInput = document.getElementById('kyHistMonth');
+  const selMonth = monthInput ? monthInput.value : '';
+  try{
+    const snap = await fb.get(fb.ref(fb.db, 'ky_orders_history'));
+    if(!snap.exists()){
+      el.innerHTML = '<div style="padding:20px;text-align:center;color:#888;font-size:.85rem">📭 출고 완료된 주문이 없습니다</div>';
+      return;
+    }
+    const all = Object.values(snap.val()||{});
+    const filtered = selMonth ? all.filter(o => (o.orderDate||'').startsWith(selMonth)) : all;
+    filtered.sort((a,b) => String(b.movedToHistoryAt||b.statusUpdatedAt||b.createdAt||'').localeCompare(String(a.movedToHistoryAt||a.statusUpdatedAt||a.createdAt||'')));
+    if(!filtered.length){
+      el.innerHTML = '<div style="padding:20px;text-align:center;color:#888;font-size:.85rem">📭 해당 월에 주문이 없습니다</div>';
+      return;
+    }
+    el.innerHTML = filtered.map(o => {
+      const statusLabel = o.status === 'shipped' ? '출고완료' : (o.status === 'received' ? '반품입고' : o.status);
+      const statusBg = o.status === 'shipped' ? '#eff6ff' : '#f0fdf4';
+      const statusColor = o.status === 'shipped' ? '#2563eb' : '#16a34a';
+      const items = (o.items||[]).map(i => `${i.product} ${fmt(i.qty)}개`).join(', ');
+      const shippedAt = o.statusUpdatedAt ? new Date(o.statusUpdatedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+      const isSuper = isSuperAdmin();
+      return `<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <div>
+            <span style="font-weight:700;font-size:.88rem">${o.dealerName||'-'}</span>
+            <span style="margin-left:8px;background:${statusBg};color:${statusColor};padding:2px 8px;border-radius:10px;font-size:.65rem;font-weight:700">${statusLabel}</span>
+          </div>
+          <div style="font-family:monospace;font-size:.85rem;font-weight:800;color:var(--yellow)">${fmt(o.total||0)}원</div>
+        </div>
+        <div style="font-size:.8rem;color:var(--text2);margin-bottom:4px">${items}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:.7rem;color:var(--text3);font-family:monospace">
+          <span>주문 ${o.orderDate||''} · 처리 ${shippedAt}</span>
+          ${isSuper ? `<button onclick="kyDeleteHistoryItem('${o.id}')" style="background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:5px;padding:3px 8px;font-size:.68rem;cursor:pointer">🗑 삭제</button>` : ''}
+        </div>
+        ${o.statusNote ? `<div style="font-size:.72rem;color:var(--text2);background:var(--surface2,#f8f9fc);border-radius:5px;padding:5px 8px;margin-top:6px">📝 ${o.statusNote}${o.processedBy?` (${o.processedBy})`:''}</div>` : ''}
+      </div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:.85rem">❌ 로드 실패: '+e.message+'</div>';
+  }
+}
+
+async function kyDeleteHistoryItem(id){
+  if(!isSuperAdmin()){ toast('총괄관리자만 삭제할 수 있습니다','error'); return; }
+  if(!confirm('이 주문 히스토리를 삭제하시겠습니까?\n(이미 발주/수금/재고에 반영된 내용은 삭제되지 않습니다)')) return;
+  const fb = window._fb;
+  if(!fb || !fb.ready){ toast('Firebase 미연결','error'); return; }
+  try{
+    await fb.set(fb.ref(fb.db,'ky_orders_history/'+id), null);
+    toast('✅ 히스토리 삭제 완료','success');
+    kyRenderHistory();
+  }catch(e){ toast('삭제 실패: '+e.message,'error'); }
 }
 
 function kySetSync(on, label){
@@ -5890,7 +6112,11 @@ function kyAdminRefresh(){
   const fb = window._fb;
   if(!fb||!fb.ready){ toast('Firebase 미연결','error'); return; }
   toast('새로고침 중...','info');
-  reloadKyOrders('manual').then(()=>{
+  Promise.all([
+    reloadKyOrders('manual'),
+    kyPurgeOldHistory(),
+    kyRenderHistory()
+  ]).then(()=>{
     toast('완료','success');
   }).catch(e=>toast('실패: '+e.message,'error'));
 }
@@ -6020,7 +6246,49 @@ const kyStatusMap = {
   cancelled:{label:'취소됨',cls:'rejected'}
 };
 
-function kyRenderOrders(list){ /* 목록 제거됨 — 팝업으로만 처리 */ }
+function kyRenderOrders(list){
+  const el = document.getElementById('kyOrdersList');
+  if(!el) return;
+  el.style.display = 'block';
+  const visible = (list||[]).filter(o => o.status !== 'cancelled');
+  if(!visible.length){
+    el.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--text3,#888);font-size:.88rem">📭 주문이 없습니다</div>';
+    return;
+  }
+  const statusColors = {pending:'#d97706',accepted:'#16a34a',shipped:'#2563eb',received:'#16a34a'};
+  const statusBg    = {pending:'#fffbeb',accepted:'#f0fdf4',shipped:'#eff6ff',received:'#f0fdf4'};
+  const statusLabels= {pending:'대기',accepted:'접수',shipped:'출고완료',received:'입고완료'};
+  el.innerHTML = visible.map(o => {
+    const isNew = o.status==='pending';
+    const sc = statusColors[o.status]||'#888';
+    const sb = statusBg[o.status]||'#f3f4f6';
+    const label = statusLabels[o.status]||o.status;
+    const chips = (o.items||[]).map(i=>
+      `<span style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:4px 10px;font-size:.75rem;font-weight:700;color:#b45309">📦 ${i.product} ${fmt(i.qty)}개 · ${fmt(i.total)}원</span>`
+    ).join('');
+    const ct = o.createdAt ? new Date(o.createdAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    return `<div style="background:#fff;border:${isNew?'1.5px solid var(--yellow,#eab308)':'1px solid var(--border,#e5e7eb)'};${isNew?'border-left:4px solid var(--yellow,#eab308)':''};border-radius:10px;padding:16px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <div style="font-size:.95rem;font-weight:700">${o.dealerName||'-'}${isNew?'<span style="margin-left:8px;background:#ef4444;color:#fff;padding:2px 6px;border-radius:8px;font-size:.58rem">NEW</span>':''}</div>
+          <div style="font-size:.7rem;color:var(--text3,#888);font-family:monospace;margin-top:2px">${o.id||''} · ${o.orderDate||''} ${ct}</div>
+        </div>
+        <span style="background:${sb};color:${sc};padding:3px 10px;border-radius:20px;font-size:.68rem;font-weight:700">${label}</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${chips}</div>
+      ${o.memo?`<div style="font-size:.78rem;color:var(--text2,#666);background:var(--surface2,#f8f9fc);border-radius:6px;padding:7px 10px;margin-bottom:10px;border-left:3px solid #fde68a">💬 ${o.memo}</div>`:''}
+      ${o.statusNote?`<div style="font-size:.78rem;color:var(--text2,#666);background:var(--surface2,#f8f9fc);border-radius:6px;padding:7px 10px;margin-bottom:10px;border-left:3px solid var(--yellow,#eab308)">📝 관리자메모: ${o.statusNote}${o.processedBy?` (${o.processedBy})`:''}</div>`:''}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding-top:10px;border-top:1px solid var(--border,#e5e7eb)">
+        ${(o.status==='pending'||o.status==='accepted')?`
+          <button class="btn btn-primary" style="padding:8px 18px;font-size:.88rem;background:#2563eb;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer" onclick="kyOpenAction('${o.id}','shipped')">🚚 출고</button>
+        `:''}
+        ${o.status==='shipped'?`<span style="font-size:.78rem;color:#16a34a;font-weight:700">✅ 출고완료</span>`:''}
+        <span style="margin-left:auto;font-family:monospace;font-size:.9rem;font-weight:800;color:var(--yellow,#b45309)">${fmt(o.total)}원</span>
+        ${isSuperAdmin() ? `<button onclick="kyDeleteOrder('${o.id}')" style="margin-left:8px;background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:6px;padding:4px 10px;font-size:.72rem;cursor:pointer">🗑 삭제</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
 
 async function kyDeleteOrder(orderId){
   if(!confirm('이 주문을 KY주문관리에서 삭제할까요?\n(연동된 발주/재고이력도 함께 정리됩니다)')) return;
@@ -6140,12 +6408,15 @@ async function kyConfirmAction(orderId, targetStatus){
     toast('✅ '+o.dealerName+' → '+(lbl[targetStatus]||targetStatus),'success');
     kyCloseDetail();
 
-    // ★ 출고/반품입고 완료 후 KY주문관리에서 항목 삭제 (발주내역에서 확인)
+    // ★ 출고/반품입고 완료 후 히스토리로 이동 (1년간 보관)
     if(targetStatus === 'shipped' || targetStatus === 'received'){
       try{
+        const histPayload = { ...updated, movedToHistoryAt: now };
+        await fb.set(fb.ref(fb.db,'ky_orders_history/'+orderId), histPayload);
         await fb.set(fb.ref(fb.db,'ky_orders/'+orderId), null);
         applyLocalKyOrderRemoval(orderId);
-      }catch(e2){ console.warn('KY주문 삭제 실패(출고 후):', e2); }
+        if(typeof kyRenderHistory === 'function') kyRenderHistory();
+      }catch(e2){ console.warn('KY주문 히스토리 이동 실패:', e2); }
     }
   }catch(e){ toast('❌ 처리 실패: '+e.message,'error'); }
 }
@@ -6410,89 +6681,155 @@ document.addEventListener('visibilitychange',()=>{
 
 // ── 관리자 코드 관리 ──
 async function loadAdminCodes(){
+// ═══════════════════════════════════════════════════════
+// 관리자 이메일/코드 관리 (Firebase Auth 자동 동기화)
+// 데이터 저장 경로: amt_admins/{uid} = {name, email, code, role}
+// ═══════════════════════════════════════════════════════
+async function loadAdminCodes(){
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
-  const snap = await fb.get(fb.ref(fb.db,'amt_pw'));
-  const data = snap.exists() ? snap.val() : {};
-  renderAdminCodeList(data);
+  try{
+    const snap = await fb.get(fb.ref(fb.db,'amt_admins'));
+    const data = snap.exists() ? snap.val() : {};
+    renderAdminCodeList(data);
+  }catch(e){
+    // 규칙 미허용 등
+    renderAdminCodeList({});
+  }
 }
 
 function renderAdminCodeList(data){
   const wrap = document.getElementById('adminCodeListWrap');
   if(!wrap) return;
-  const entries = Object.entries(data);
-  if(!entries.length){
-    wrap.innerHTML = '<div style="font-size:.8rem;color:#888;padding:8px">등록된 관리자가 없습니다.</div>';
-    return;
-  }
-  const superNote = document.getElementById('adminCodeSuperNote');
-  const isSuper = isSuperAdmin();
-  if(superNote) superNote.style.display = isSuper ? 'block' : 'none';
 
-  wrap.innerHTML = entries.map(([name, code]) => {
-    // ★ 총관리자: 모든 코드 표시·수정 가능
-    // ★ 일반 관리자: 자기 코드만 수정 가능 (다른 사람 코드는 마스킹)
-    const myName = window._amtAdminName || '';
-    const canEdit = isSuper || name === myName;
-    const displayCode = isSuper ? code : (name === myName ? code : '●●●●●●');
+  const isSuper = isSuperAdmin();
+  const myEmail = (JSON.parse(sessionStorage.getItem('amt_auth_session')||'{}').email)||'';
+
+  // 총괄관리자만 "새 관리자 추가" 표시
+  const addBox = document.getElementById('addAdminBox');
+  if(addBox) addBox.style.display = isSuper ? 'block' : 'none';
+
+  // 하드코딩된 기본 관리자 (데이터 없을 때도 표시)
+  const defaults = [
+    {email:'kyunghoyou@gmail.com', name:'유경호 (총괄)', role:'super'},
+    {email:'amedtech@gmail.com',   name:'강승섭 (일반)', role:'admin'}
+  ];
+
+  // 서버 데이터 + 기본 관리자 merge
+  const list = [...defaults];
+  Object.values(data||{}).forEach(a => {
+    if(!list.find(d => d.email === a.email)) list.push(a);
+  });
+  // 서버 데이터 있으면 defaults의 코드 덮어쓰기
+  list.forEach(a => {
+    const srv = Object.values(data||{}).find(x => x.email === a.email);
+    if(srv) Object.assign(a, srv);
+  });
+
+  wrap.innerHTML = list.map(a => {
+    const isMine = a.email === myEmail;
+    const canSee = isSuper || isMine;
+    const codeDisplay = canSee ? (a.code||'─') : '●●●●●●';
+    const canEdit = isSuper || isMine;
+    const safeEmail = a.email.replace(/[^a-zA-Z0-9]/g,'_');
     return `
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
-      <span style="flex:1;font-weight:700;font-size:.88rem">${name}${name===myName?'<span style="font-size:.65rem;margin-left:4px;color:var(--yellow)">(나)</span>':''}</span>
+    <div style="display:grid;grid-template-columns:1.5fr 2fr 1fr auto;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);align-items:center;font-size:.85rem">
+      <span style="font-weight:700">${a.name||'─'}${isMine?'<span style="font-size:.65rem;margin-left:4px;color:var(--yellow)">(나)</span>':''}</span>
+      <span style="font-family:monospace;font-size:.78rem;color:var(--text2)">${a.email}</span>
       ${canEdit
-        ? `<input type="text" id="acode_${name}" value="${displayCode}"
-            style="width:90px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:monospace;font-size:.9rem;font-weight:700;text-align:center">
-           <button class="btn btn-primary btn-xs" onclick="saveOneAdminCode('${name}')">저장</button>
-           ${isSuper ? `<button class="btn btn-danger btn-xs" onclick="deleteAdminCode('${name}')">삭제</button>` : ''}`
-        : `<span style="font-family:monospace;font-size:.9rem;color:#9ca3af;padding:5px 8px">${displayCode}</span>`
+        ? `<input type="text" id="acode_${safeEmail}" value="${codeDisplay}"
+            style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:monospace;font-size:.85rem;font-weight:700;text-align:center">`
+        : `<span style="font-family:monospace;font-size:.85rem;color:#9ca3af;padding:5px 8px;text-align:center">${codeDisplay}</span>`
       }
+      <div style="display:flex;gap:4px">
+        ${canEdit ? `<button class="btn btn-primary btn-xs" onclick="saveOneAdminCode('${a.email}','${a.name||''}')">저장</button>` : ''}
+        ${isSuper && a.role !== 'super' ? `<button class="btn btn-danger btn-xs" onclick="deleteAdminCode('${a.email}')">🗑</button>` : ''}
+      </div>
     </div>`;
   }).join('');
 }
 
-async function saveOneAdminCode(name){
+async function saveOneAdminCode(email, name){
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
-  const newCode = (document.getElementById('acode_'+name).value||'').trim();
+  const safeEmail = email.replace(/[^a-zA-Z0-9]/g,'_');
+  const newCode = (document.getElementById('acode_'+safeEmail).value||'').trim();
   if(!newCode){ alert('코드를 입력하세요'); return; }
-  await fb.set(fb.ref(fb.db,'amt_pw/'+name), newCode);
-  toast('✅ '+name+' 코드 저장됨','success');
+  if(!/^\d{4,10}$/.test(newCode)){ alert('코드는 숫자 4~10자리여야 합니다'); return; }
+
+  try{
+    // Firebase Auth 계정 생성 (이미 있으면 skip) + Auth 비밀번호 업데이트
+    const helpers = window._firebaseHelpers || {};
+    if(helpers.ensureAuthAccount){
+      await helpers.ensureAuthAccount(email, newCode, name||email);
+    }
+
+    // DB에 저장
+    const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+    await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
+      email, name:name||email, code:newCode,
+      role: email==='kyunghoyou@gmail.com'?'super':'admin',
+      updatedAt: new Date().toISOString()
+    });
+    toast('✅ '+name+' 코드 저장됨 (Auth 동기화)','success');
+    loadAdminCodes();
+  }catch(e){
+    console.error(e);
+    if(String(e.message||'').includes('email-already-in-use')){
+      toast('⚠️ '+name+' 코드 저장됨 (Auth는 이미 존재 - 총관리자가 Firebase Console에서 비밀번호 재설정 필요)','info');
+      // DB만 저장
+      const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+      await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
+        email, name:name||email, code:newCode,
+        role: email==='kyunghoyou@gmail.com'?'super':'admin',
+        updatedAt: new Date().toISOString()
+      });
+      loadAdminCodes();
+    } else {
+      toast('❌ 저장 실패: '+e.message,'error');
+    }
+  }
 }
 
-async function deleteAdminCode(name){
-  if(!confirm(name+' 관리자를 삭제하시겠습니까?')) return;
+async function deleteAdminCode(email){
+  if(!isSuperAdmin()){ toast('총괄관리자만 삭제 가능','error'); return; }
+  if(!confirm(email+' 관리자를 삭제하시겠습니까?\n(Firebase Auth 계정은 Console에서 직접 삭제해야 합니다)')) return;
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
-  await fb.set(fb.ref(fb.db,'amt_pw/'+name), null);
-  toast(name+' 삭제됨','info');
+  const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+  await fb.set(fb.ref(fb.db,'amt_admins/'+key), null);
+  toast(email+' DB에서 삭제됨','info');
   loadAdminCodes();
 }
 
 async function addAdminCode(){
+  if(!isSuperAdmin()){ toast('총괄관리자만 추가 가능','error'); return; }
   const name = (document.getElementById('newAdminName').value||'').trim();
+  const email = (document.getElementById('newAdminEmail').value||'').trim().toLowerCase();
   const code = (document.getElementById('newAdminCode').value||'').trim();
-  if(!name||!code){ alert('이름과 코드를 모두 입력하세요'); return; }
-  const fb = window._fb;
-  if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
-  await fb.set(fb.ref(fb.db,'amt_pw/'+name), code);
+  if(!name||!email||!code){ alert('이름/이메일/코드 모두 입력'); return; }
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ alert('이메일 형식이 올바르지 않습니다'); return; }
+  if(!/^\d{4,10}$/.test(code)){ alert('코드는 숫자 4~10자리'); return; }
+
+  await saveOneAdminCode(email, name); // 내부적으로 Auth 생성 + DB 저장
   document.getElementById('newAdminName').value='';
+  document.getElementById('newAdminEmail').value='';
   document.getElementById('newAdminCode').value='';
-  toast('✅ '+name+' 추가됨','success');
-  loadAdminCodes();
 }
 
-// ── 대리점 코드 관리 ──
+// ── 대리점 이메일/코드 관리 ──
 function loadDealerCodes(){
   const fb = window._fb;
   if(!fb||!fb.ready){
-    // 로컬 데이터 사용
     const d = (window.dealers||[]);
     renderDealerCodeList(d);
     return;
   }
-  fb.get(fb.ref(fb.db,'amt_data')).then(snap=>{
+  fb.get(fb.ref(fb.db,'amt_data/dealers')).then(snap=>{
     if(!snap.exists()){ renderDealerCodeList([]); return; }
-    const d = snap.val().dealers||[];
-    renderDealerCodeList(d);
+    renderDealerCodeList(snap.val()||[]);
+  }).catch(()=>{
+    renderDealerCodeList(window.dealers||[]);
   });
 }
 
@@ -6503,14 +6840,30 @@ function renderDealerCodeList(dealers){
     wrap.innerHTML = '<div style="font-size:.8rem;color:#888;padding:8px">등록된 대리점이 없습니다.</div>';
     return;
   }
-  wrap.innerHTML = dealers.map((d,i) => `
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
-      <span style="flex:1;font-weight:700;font-size:.88rem">${d.name}</span>
-      <input type="text" id="dcode_${i}" value="${d.code||d.id||''}"
-        style="width:90px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:monospace;font-size:.9rem;font-weight:700;text-align:center">
-      <button class="btn btn-primary btn-xs" onclick="saveDealerCode(${i},'${d.id}')">저장</button>
-    </div>
-  `).join('');
+  // 관리자(super/admin)만 코드 보기/편집 가능
+  const sess = JSON.parse(sessionStorage.getItem('amt_auth_session')||'{}');
+  const isAdmin = sess.role === 'super' || sess.role === 'admin';
+
+  wrap.innerHTML = dealers.map((d,i) => {
+    const code = d.code || '';
+    const email = d.email || '';
+    const display = isAdmin ? code : (code ? '●●●●●●' : '─');
+    return `
+    <div style="display:grid;grid-template-columns:1.5fr 2fr 1.1fr auto;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);align-items:center;font-size:.85rem">
+      <span style="font-weight:700">${d.name||'─'}</span>
+      <span style="font-family:monospace;font-size:.78rem;color:var(--text2)">${email||'<span style=\"color:#9ca3af\">이메일 미등록</span>'}</span>
+      ${isAdmin
+        ? `<input type="text" id="dcode_${i}" value="${display}" maxlength="6" placeholder="6자리"
+            style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:monospace;font-size:.9rem;font-weight:700;text-align:center">`
+        : `<span style="font-family:monospace;font-size:.9rem;color:#9ca3af;padding:5px 8px;text-align:center">${display}</span>`
+      }
+      ${isAdmin ? `<button class="btn btn-primary btn-xs" onclick="saveDealerCode(${i},'${d.id}')">저장</button>` : ''}
+    </div>`;
+  }).join('');
+
+  if(!isAdmin){
+    wrap.insertAdjacentHTML('afterbegin', '<div style="padding:8px;background:#fef9c3;border:1px solid #fde047;border-radius:6px;font-size:.78rem;color:#713f12;margin-bottom:8px">관리자만 대리점 코드를 조회/변경할 수 있습니다.</div>');
+  }
 }
 
 async function saveDealerCode(idx, dealerId){
@@ -6518,27 +6871,32 @@ async function saveDealerCode(idx, dealerId){
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
   const newCode = (document.getElementById('dcode_'+idx).value||'').trim();
   if(!newCode){ alert('코드를 입력하세요'); return; }
+  if(!/^\d{6}$/.test(newCode)){ alert('대리점 코드는 6자리 숫자여야 합니다'); return; }
 
   try{
-    // ★ 핵심 수정: 전체 amt_data를 읽어 code 업데이트 후 전체 저장
-    // 부분 저장(amt_data/dealers)만 하면 AMT fbSaveAll이 로컬 메모리로 덮어씌움
-    const snap = await fb.get(fb.ref(fb.db,'amt_data'));
-    if(!snap.exists()){ alert('데이터 없음'); return; }
-    const data = snap.val();
-    const remoteDealers = data.dealers||[];
-    const di = remoteDealers.findIndex(d=>d.id===dealerId);
-    if(di<0){ alert('대리점을 찾을 수 없습니다'); return; }
-    remoteDealers[di].code = newCode;
-    data.dealers = remoteDealers;
-    data._updatedAt = new Date().toISOString();
-    // 전체 저장
-    await fb.set(fb.ref(fb.db,'amt_data'), data);
-    // 로컬 메모리도 업데이트 (다음 fbSaveAll에서 코드 보존)
-    const localDi = dealers.findIndex(d=>d.id===dealerId);
-    if(localDi>=0) dealers[localDi].code = newCode;
-    saveLS();
-    toast('✅ '+remoteDealers[di].name+' 코드 → '+newCode,'success');
-    loadDealerCodes(); // 목록 새로고침
+    // 로컬 dealers에서 해당 대리점 찾기
+    const d = dealers.find(x => x.id === dealerId);
+    if(!d){ alert('대리점을 찾을 수 없습니다'); return; }
+    d.code = newCode;
+
+    // ★ Firebase Auth 자동 동기화 (이메일이 있는 경우)
+    if(d.email){
+      const helpers = window._firebaseHelpers || {};
+      if(helpers.ensureAuthAccount){
+        try{
+          await helpers.ensureAuthAccount(d.email, newCode, d.name);
+        }catch(e){
+          if(!String(e.message||'').includes('email-already-in-use')){
+            console.warn('대리점 Auth 동기화 실패:', e);
+          }
+        }
+      }
+    }
+
+    // 원격 전체 동기화 (충돌 방지 - 질문 11 적용)
+    await fbSaveAll();
+    toast('✅ '+d.name+' 코드 → '+newCode+(d.email?' (Auth 동기화)':'')+' 저장됨','success');
+    loadDealerCodes();
   }catch(e){
     toast('❌ 저장 실패: '+e.message,'error');
   }
@@ -6549,14 +6907,11 @@ function requestCodeChange(type){
   const subject = encodeURIComponent('[AMT] '+type+' 코드 변경 요청');
   const body = encodeURIComponent(
     type + ' 코드 변경을 요청합니다.\n\n' +
-    '요청자: \n' +
-    '변경 대상: \n' +
-    '사유: \n\n' +
-    '── 자동 생성 ──\n' +
-    '요청 시각: ' + new Date().toLocaleString('ko-KR') + '\n' +
+    '요청자: \n변경 대상: \n사유: \n\n' +
+    '── 자동 생성 ──\n요청 시각: ' + new Date().toLocaleString('ko-KR') + '\n' +
     '기기: ' + navigator.userAgent.substring(0,60)
   );
-  window.open('mailto:amedtech@gmail.com?subject='+subject+'&body='+body);
+  window.open('mailto:kyunghoyou@gmail.com?subject='+subject+'&body='+body);
 }
 
 
@@ -6643,7 +6998,7 @@ function isSuperAdmin(){
 
 // OTP 요청: 총관리자가 아닌 경우 OTP 필요
 async function requireOtp(actionLabel, callback){
-  // 총관리자(9350)는 OTP 없이 바로 실행
+  // 총관리자는 OTP 없이 바로 실행
   if(isSuperAdmin()){
     await callback();
     return;
@@ -6651,41 +7006,40 @@ async function requireOtp(actionLabel, callback){
 
   _otpPending = { label: actionLabel, callback };
 
-  // Firebase에 OTP 요청 기록 (총관리자가 볼 수 있도록)
   const fb = window._fb;
   const otp6 = Math.floor(100000 + Math.random() * 900000).toString();
   const reqId = 'otp_' + Date.now();
+  const nowIso = new Date().toISOString();
   const req = {
     id: reqId,
     otp: otp6,
     action: actionLabel,
     requestedBy: window._amtAdminName || '알 수 없음',
-    requestedAt: new Date().toISOString(),
+    requestedAt: nowIso,
     expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     used: false
   };
 
+  // ★ 모달을 먼저 즉시 표시 (사용자 즉각 피드백)
+  showOtpModal(reqId, actionLabel, otp6);
+
+  // ★ Firebase 저장 + 텔레그램 발송은 백그라운드로 병렬 처리 (블로킹 없음)
   if(fb && fb.ready){
-    try{
-      await fb.set(fb.ref(fb.db, 'amt_otp/' + reqId), req);
-      // 총관리자 알림 (Firebase notifications 경로)
-      await fb.set(fb.ref(fb.db, 'amt_notifications/' + reqId), {
+    Promise.all([
+      fb.set(fb.ref(fb.db, 'amt_otp/' + reqId), req).catch(e=>console.warn('OTP 저장 실패', e)),
+      fb.set(fb.ref(fb.db, 'amt_notifications/' + reqId), {
         type: 'otp_request',
         message: `[OTP 요청] ${window._amtAdminName}이(가) "${actionLabel}" 작업을 요청했습니다.`,
         otp: otp6,
         requestedBy: window._amtAdminName,
         action: actionLabel,
-        at: new Date().toISOString(),
+        at: nowIso,
         read: false
-      });
-    }catch(e){ console.warn('OTP 저장 실패', e); }
+      }).catch(e=>console.warn('OTP 알림 저장 실패', e))
+    ]).catch(()=>{});
   }
 
-  // ★ 텔레그램으로 OTP 발송 (총관리자)
   sendTelegramOtp(otp6, actionLabel, window._amtAdminName || '알 수 없음').catch(()=>{});
-
-  // OTP 입력 모달 표시 (총관리자에게 코드 받아서 입력)
-  showOtpModal(reqId, actionLabel, otp6);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -6864,57 +7218,72 @@ function startSuperAdminNotifListener(){
   if(!fb || !fb.ready) return;
   if(_notifListener) return;
 
+  // ★ 첫 로드 시점 기록 (이후 생성된 알림만 팝업)
+  let _firstLoad = true;
+  let _firstLoadTime = new Date().toISOString();
+
   _notifListener = fb.onValue(fb.ref(fb.db, 'amt_notifications'), (snap) => {
-    if(!snap.exists()) return;
+    if(!snap.exists()){
+      updateSuperAdminBadge(0);
+      return;
+    }
     const notifs = snap.val();
     const unread = Object.values(notifs).filter(n => !n.read);
 
-    // ★ 팝업은 가장 최근 알림 1개만 표시 (타입별로 최신 1개)
-    const byType = {};
-    unread.forEach(n => {
-      const t = n.type || 'other';
-      if(!byType[t] || (n.at||'') > (byType[t].at||'')) byType[t] = n;
-    });
+    // ★ 첫 로드: 가장 최근 1개 알림만 팝업
+    if(_firstLoad){
+      _firstLoad = false;
+      const latest = [...unread].sort((a,b) => String(b.at||'').localeCompare(String(a.at||'')))[0];
+      if(latest){
+        const key = 'shown_' + (latest.id || latest.at || latest.message || '');
+        if(!sessionStorage.getItem(key)){
+          sessionStorage.setItem(key, '1');
+          _showNotifPopup(latest);
+        }
+      }
+      if(isSuperAdmin()) updateSuperAdminBadge(unread.length);
+      return;
+    }
 
-    Object.values(byType).forEach(n => {
+    // ★ 이후: _firstLoadTime 이후 생성된 새 알림만 팝업
+    const newOnes = unread.filter(n => (n.at||'') > _firstLoadTime);
+    newOnes.forEach(n => {
       const key = 'shown_' + (n.id || n.at || n.message || '');
       if(sessionStorage.getItem(key)) return;
       sessionStorage.setItem(key, '1');
-
-      if(n.type === 'otp_request'){
-        if(isSuperAdmin()) showSuperAdminNotif(n);
-      } else if(n.type === 'code_request'){
-        showCodeRequestPopup(n);
-        if(Notification && Notification.permission === 'granted'){
-          new Notification('🔑 대리점 코드 요청', {
-            body: (n.message||'').replace('[코드요청] ','') || '새 코드 요청이 도착했습니다.',
-            icon: '/AMT/icon-192.png',
-            tag: 'code-request-' + (n.at||''),
-            requireInteraction: true
-          });
-        }
-      } else if(n.type === 'ky_order'){
-        showKyOrderNotif(n);
-        if(Notification && Notification.permission === 'granted'){
-          new Notification('📦 KY 주문 상태 변경', {
-            body: n.message || '',
-            icon: '/AMT/icon-192.png',
-            tag: 'ky-order-' + (n.orderId||''),
-            requireInteraction: false
-          });
-        }
-      } else {
-        if(isSuperAdmin()) showSuperAdminNotif(n);
-      }
+      _showNotifPopup(n);
     });
 
-    if(isSuperAdmin()){
-      updateSuperAdminBadge(unread.length);
-    }
+    if(isSuperAdmin()) updateSuperAdminBadge(unread.length);
   });
 
   if(Notification && Notification.permission === 'default'){
     Notification.requestPermission();
+  }
+}
+
+// 알림 타입별 팝업 표시
+function _showNotifPopup(n){
+  if(n.type === 'otp_request'){
+    if(isSuperAdmin()) showSuperAdminNotif(n);
+  } else if(n.type === 'code_request'){
+    showCodeRequestPopup(n);
+    if(Notification && Notification.permission === 'granted'){
+      new Notification('🔑 대리점 코드 요청', {
+        body: (n.message||'').replace('[코드요청] ','') || '새 코드 요청이 도착했습니다.',
+        icon: '/AMT/icon-192.png', tag: 'code-request-' + (n.at||''), requireInteraction: true
+      });
+    }
+  } else if(n.type === 'ky_order'){
+    showKyOrderNotif(n);
+    if(Notification && Notification.permission === 'granted'){
+      new Notification('📦 KY 주문 상태 변경', {
+        body: n.message || '', icon: '/AMT/icon-192.png',
+        tag: 'ky-order-' + (n.orderId||''), requireInteraction: false
+      });
+    }
+  } else {
+    if(isSuperAdmin()) showSuperAdminNotif(n);
   }
 }
 
@@ -7046,19 +7415,95 @@ function showCodeRequestPopup(n){
 }
 
 function updateSuperAdminBadge(count){
+  // ★ 기존 superAdminNotifBadge (badge 안에 동적 생성되던 것)
   let badge = document.getElementById('superAdminNotifBadge');
   if(!badge){
     const badgeEl = document.createElement('span');
     badgeEl.id = 'superAdminNotifBadge';
     badgeEl.style.cssText = 'background:#ef4444;color:#fff;padding:2px 6px;border-radius:10px;font-size:.65rem;font-weight:700;margin-left:4px;cursor:pointer';
-    // ★ 클릭하면 알림 패널 열기
-    badgeEl.onclick = (e) => { e.stopPropagation(); toggleSuperNotifPanel(); };
+    badgeEl.onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); };
     const adminBadge = document.getElementById('amtAdminBadge');
     if(adminBadge) adminBadge.appendChild(badgeEl);
     badge = badgeEl;
   }
   badge.textContent = count > 0 ? count : '';
   badge.style.display = count > 0 ? 'inline' : 'none';
+
+  // ★ 새로 추가된 amtNotifChip도 갱신
+  const chip = document.getElementById('amtNotifChip');
+  if(chip){
+    chip.textContent = '🔔 ' + (count > 0 ? count : 0);
+    chip.style.display = count > 0 ? 'inline-flex' : 'none';
+  }
+}
+
+/* ═══ 전체 알림 패널 ═══ */
+function toggleNotifPanel(){
+  const panel = document.getElementById('amtNotifPanel');
+  if(!panel) return;
+  const isOpen = panel.style.display === 'flex';
+  if(isOpen){
+    panel.style.display = 'none';
+  } else {
+    panel.style.display = 'flex';
+    renderNotifPanelContent();
+  }
+}
+
+async function renderNotifPanelContent(){
+  const el = document.getElementById('amtNotifListContent');
+  if(!el) return;
+  const fb = window._fb;
+  if(!fb || !fb.ready){ el.innerHTML = '<div style="padding:30px;text-align:center;color:#888">Firebase 미연결</div>'; return; }
+  try{
+    const snap = await fb.get(fb.ref(fb.db, 'amt_notifications'));
+    if(!snap.exists()){
+      el.innerHTML = '<div style="padding:30px;text-align:center;color:#888;font-size:.85rem">📭 알림이 없습니다</div>';
+      return;
+    }
+    const all = snap.val() || {};
+    const list = Object.entries(all).map(([id,n])=>({...n, _id:id}));
+    // 최신순 정렬
+    list.sort((a,b) => String(b.at||'').localeCompare(String(a.at||'')));
+    if(!list.length){ el.innerHTML = '<div style="padding:30px;text-align:center;color:#888">📭 알림이 없습니다</div>'; return; }
+    el.innerHTML = list.map(n => {
+      const typeColor = {otp_request:'#ef4444',code_request:'#d97706',ky_order:'#2563eb',activity:'#16a34a'}[n.type] || '#6b7280';
+      const typeIcon = {otp_request:'🔐',code_request:'🔑',ky_order:'📦',activity:'📝'}[n.type] || '🔔';
+      const when = n.at ? new Date(n.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+      const unreadMark = n.read ? '' : '<span style="color:#ef4444;font-size:.7rem;margin-left:6px">●</span>';
+      return `<div style="padding:10px 18px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;${n.read?'':'background:#fffbeb'}">
+        <span style="font-size:1.1rem">${typeIcon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.82rem;font-weight:${n.read?'500':'700'};color:${typeColor};margin-bottom:3px">${unreadMark}${when}</div>
+          <div style="font-size:.82rem;color:var(--text);word-break:break-word">${(n.message||'').replace(/</g,'&lt;')}</div>
+        </div>
+        <button onclick="deleteSingleNotif('${n._id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:.9rem" title="삭제">✕</button>
+      </div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML = '<div style="padding:20px;color:#ef4444">❌ 로드 실패: '+e.message+'</div>';
+  }
+}
+
+async function clearAllAmtNotif(){
+  if(!confirm('모든 알림을 삭제하시겠습니까?')) return;
+  const fb = window._fb;
+  if(!fb || !fb.ready){ toast('Firebase 미연결','error'); return; }
+  try{
+    await fb.set(fb.ref(fb.db, 'amt_notifications'), null);
+    toast('✅ 전체 알림 삭제 완료','success');
+    renderNotifPanelContent();
+    updateSuperAdminBadge(0);
+  }catch(e){ toast('삭제 실패: '+e.message,'error'); }
+}
+
+async function deleteSingleNotif(id){
+  const fb = window._fb;
+  if(!fb || !fb.ready) return;
+  try{
+    await fb.set(fb.ref(fb.db, 'amt_notifications/'+id), null);
+    renderNotifPanelContent();
+  }catch(e){}
 }
 
 /* ═══ 총관리자 알림 패널 ═══ */
@@ -7214,7 +7659,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260418-v6')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260418-v10')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
