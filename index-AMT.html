@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>AMT 관리시스템 로그인</title>
+  <style>
+    :root{--blue:#1a73e8;--red:#ef4444;--green:#16a34a;--gray:#6b7280;--border:#e5e7eb;}
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Pretendard','Apple SD Gothic Neo',sans-serif;background:linear-gradient(135deg,#f0f4ff 0%,#e8f0fe 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;}
+    .card{background:#fff;border-radius:20px;box-shadow:0 8px 40px rgba(26,115,232,.12);width:100%;max-width:380px;padding:40px 36px;}
+    .logo{display:flex;align-items:center;gap:12px;margin-bottom:32px;}
+    .logo-icon{width:48px;height:48px;background:var(--blue);border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:1rem;letter-spacing:1px;}
+    .logo-text{font-size:1.25rem;font-weight:800;color:#111;}
+    .logo-sub{font-size:.75rem;color:var(--gray);}
+    label{display:block;font-size:.8rem;font-weight:600;color:#374151;margin-bottom:6px;}
+    .field{margin-bottom:16px;}
+    input[type=email],input[type=password],input[type=text]{width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;outline:none;transition:border .2s;}
+    input:focus{border-color:var(--blue);}
+    .btn{width:100%;padding:14px;border:none;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;transition:opacity .2s;}
+    .btn-primary{background:var(--blue);color:#fff;}
+    .btn-primary:hover{opacity:.9;}
+    .btn-secondary{background:#f3f4f6;color:#374151;margin-top:8px;}
+    .msg{font-size:.82rem;text-align:center;margin-top:12px;min-height:20px;}
+    .msg.error{color:var(--red);}
+    .msg.success{color:var(--green);}
+    .divider{border:none;border-top:1px solid var(--border);margin:20px 0;}
+    #verifyBox{display:none;}
+    .hint{font-size:.75rem;color:var(--gray);text-align:center;margin-top:6px;}
+    .remember-row{display:flex;align-items:center;gap:6px;margin-bottom:16px;}
+    .remember-row input{width:auto;}
+    .remember-row label{margin:0;font-weight:400;color:var(--gray);}
+    .otp-input{font-size:1.4rem!important;font-weight:800!important;letter-spacing:8px!important;text-align:center!important;}
+  </style>
+  <!-- EmailJS -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <script>emailjs.init('YOUR_EMAILJS_PUBLIC_KEY');</script>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">AMT</div>
+    <div>
+      <div class="logo-text">AMT 관리시스템</div>
+      <div class="logo-sub">관리자 로그인</div>
+    </div>
+  </div>
+
+  <!-- 1단계: 이메일 + 코드번호 -->
+  <div id="loginBox">
+    <div class="field">
+      <label>이메일 주소</label>
+      <input type="email" id="email" placeholder="example@gmail.com" autocomplete="email">
+    </div>
+    <div class="field">
+      <label>코드번호</label>
+      <input type="password" id="pw" placeholder="코드번호 입력" autocomplete="current-password"
+        onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="remember-row">
+      <input type="checkbox" id="rememberMe" checked>
+      <label for="rememberMe">이 기기에서 자동 로그인</label>
+    </div>
+    <button class="btn btn-primary" onclick="doLogin()">로그인</button>
+    <div class="msg" id="loginMsg"></div>
+  </div>
+
+  <!-- 2단계: 이메일 인증 (새 기기) -->
+  <div id="verifyBox">
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:2.5rem">📧</div>
+      <div style="font-weight:700;font-size:1rem;margin-top:8px">이메일 인증</div>
+      <div style="font-size:.82rem;color:var(--gray);margin-top:6px" id="verifyDesc"></div>
+    </div>
+    <div class="field">
+      <label>인증코드 (6자리)</label>
+      <input type="text" id="otpInput" class="otp-input" placeholder="000000" maxlength="6" inputmode="numeric"
+        onkeydown="if(event.key==='Enter')verifyOtp()">
+    </div>
+    <button class="btn btn-primary" onclick="verifyOtp()">인증 확인</button>
+    <button class="btn btn-secondary" onclick="resendOtp()">인증코드 재발송</button>
+    <div class="msg" id="verifyMsg"></div>
+    <div class="hint" id="verifyTimer"></div>
+    <hr class="divider">
+    <button class="btn btn-secondary" onclick="backToLogin()" style="margin-top:0">← 돌아가기</button>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const FB_CFG = {
+  apiKey: "AIzaSyC2jfTHmaguOS9e_ddTvicUZJcvXzQ7EKI",
+  authDomain: "amt-ky.firebaseapp.com",
+  projectId: "amt-ky",
+  storageBucket: "amt-ky.firebasestorage.app",
+  messagingSenderId: "1082363760608",
+  appId: "1:1082363760608:web:ac27fa51dc23cb603ee585",
+  databaseURL: "https://amt-ky-default-rtdb.asia-southeast1.firebasedatabase.app"
+};
+
+const ADMINS      = { 'kyunghoyou@gmail.com':'super', 'amedtech@gmail.com':'admin' };
+const DEVICE_KEY  = 'amt_trusted_device';
+const SESSION_KEY = 'amt_auth_session';
+const SAVED_EMAIL = 'amt_saved_email';
+const SAVED_PW    = 'amt_saved_pw';
+
+const app  = getApps().find(a=>a.name==='amt-login') || initializeApp(FB_CFG, 'amt-login');
+const auth = getAuth(app);
+const db   = getDatabase(app);
+
+let _pendingEmail='', _pendingOtpCode='', _otpExpiry=0, _timerInterval=null;
+
+// ─── 저장된 이메일/비밀번호 자동입력 ──────────────────────
+(function restoreSaved(){
+  const em = localStorage.getItem(SAVED_EMAIL)||'';
+  const pw = localStorage.getItem(SAVED_PW)||'';
+  if(em) document.getElementById('email').value = em;
+  if(pw) document.getElementById('pw').value = pw;
+})();
+
+// ─── Auth 상태 감지 ────────────────────────────────────────
+onAuthStateChanged(auth, async (user) => {
+  if(!user) return;
+  const role = ADMINS[user.email];
+  if(!role){ auth.signOut(); return; }
+
+  // 신뢰된 기기면 바로 이동
+  if(localStorage.getItem(DEVICE_KEY) === user.uid){
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({email:user.email, role, uid:user.uid}));
+    location.replace('orders-admin-AMT.html');
+    return;
+  }
+  // 새 기기 → 이메일(or 텔레그램) OTP
+  await sendOtp(user.email);
+});
+
+// ─── 로그인 ────────────────────────────────────────────────
+window.doLogin = async () => {
+  const email = document.getElementById('email').value.trim();
+  const pw    = document.getElementById('pw').value.trim();
+  if(!email||!pw){ showMsg('loginMsg','이메일과 코드번호를 입력하세요','error'); return; }
+  if(!ADMINS[email]){ showMsg('loginMsg','등록된 관리자 이메일이 아닙니다','error'); return; }
+
+  showMsg('loginMsg','로그인 중...','');
+  try {
+    await signInWithEmailAndPassword(auth, email, pw);
+    // onAuthStateChanged에서 이어서 처리됨
+  } catch(e){
+    const c=e.code||'';
+    if(c.includes('wrong-password')||c.includes('invalid-credential')) showMsg('loginMsg','코드번호가 틀립니다','error');
+    else if(c.includes('user-not-found')) showMsg('loginMsg','등록되지 않은 이메일입니다','error');
+    else if(c.includes('too-many-requests')) showMsg('loginMsg','잠시 후 다시 시도하세요','error');
+    else showMsg('loginMsg','로그인 실패: '+e.message,'error');
+  }
+};
+
+// ─── OTP 생성 및 발송 ──────────────────────────────────────
+async function sendOtp(email){
+  const code = String(Math.floor(100000+Math.random()*900000));
+  _pendingEmail   = email;
+  _pendingOtpCode = code;
+  _otpExpiry      = Date.now() + 5*60*1000;
+
+  // DB에 저장
+  try{
+    await set(ref(db,'amt_otp/'+btoa(email).replace(/=/g,'')), {code, expiry:_otpExpiry, email});
+  }catch(e){ console.warn('OTP 저장 실패',e); }
+
+  // 이메일로 OTP 발송 (EmailJS)
+  let sent = false;
+  try{
+    const snap = await get(ref(db,'config/emailjs'));
+    if(snap.exists()){
+      const cfg = snap.val(); // { serviceId, templateId, publicKey }
+      if(cfg.serviceId && cfg.templateId){
+        if(cfg.publicKey) emailjs.init(cfg.publicKey);
+        const res = await emailjs.send(cfg.serviceId, cfg.templateId, {
+          to_email: email,
+          otp_code: code,
+          app_name: 'AMT 관리시스템',
+          valid_minutes: '5'
+        });
+        if(res.status === 200) sent = true;
+      }
+    }
+  }catch(e){ console.warn('이메일 발송 실패',e); }
+
+  document.getElementById('verifyDesc').textContent =
+    sent ? `${email} 로 인증코드를 발송했습니다`
+         : `인증코드: ${code}`;
+
+  document.getElementById('loginBox').style.display  = 'none';
+  document.getElementById('verifyBox').style.display = 'block';
+  document.getElementById('otpInput').value = '';
+  startOtpTimer();
+}
+
+// ─── OTP 검증 ──────────────────────────────────────────────
+window.verifyOtp = async () => {
+  const input = document.getElementById('otpInput').value.trim();
+  if(!input){ showMsg('verifyMsg','코드를 입력하세요','error'); return; }
+  if(Date.now()>_otpExpiry){ showMsg('verifyMsg','만료됐습니다. 재발송하세요','error'); return; }
+
+  let ok = false;
+  try{
+    const snap = await get(ref(db,'amt_otp/'+btoa(_pendingEmail).replace(/=/g,'')));
+    const s = snap.val();
+    ok = s && s.code===input && Date.now()<=s.expiry;
+  }catch(e){ ok = input===_pendingOtpCode; }
+
+  if(!ok){ showMsg('verifyMsg','인증코드가 틀리거나 만료됐습니다','error'); return; }
+
+  clearInterval(_timerInterval);
+  const user = auth.currentUser;
+
+  // 기기 신뢰 + 자동완성 저장
+  if(document.getElementById('rememberMe').checked){
+    localStorage.setItem(DEVICE_KEY, user.uid);
+    localStorage.setItem(SAVED_EMAIL, _pendingEmail);
+    // 비밀번호는 이미 저장됨
+  }
+  set(ref(db,'amt_otp/'+btoa(_pendingEmail).replace(/=/g,'')),null).catch(()=>{});
+
+  const role = ADMINS[_pendingEmail]||'admin';
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({email:_pendingEmail, role, uid:user?.uid||''}));
+  showMsg('verifyMsg','✅ 인증 완료!','success');
+  setTimeout(()=>location.replace('orders-admin-AMT.html'), 700);
+};
+
+window.resendOtp = async ()=>{ if(_pendingEmail) await sendOtp(_pendingEmail); };
+window.backToLogin = ()=>{
+  clearInterval(_timerInterval);
+  document.getElementById('loginBox').style.display  = 'block';
+  document.getElementById('verifyBox').style.display = 'none';
+  document.getElementById('otpInput').value = '';
+  auth.signOut();
+};
+
+function startOtpTimer(){
+  clearInterval(_timerInterval);
+  const el = document.getElementById('verifyTimer');
+  _timerInterval = setInterval(()=>{
+    const left=Math.max(0,Math.floor((_otpExpiry-Date.now())/1000));
+    const m=Math.floor(left/60),s=left%60;
+    el.textContent = left>0?`남은 시간: ${m}:${String(s).padStart(2,'0')}`:'인증코드가 만료됐습니다';
+    if(left===0) clearInterval(_timerInterval);
+  },1000);
+}
+
+function showMsg(id,text,type){
+  const el=document.getElementById(id);
+  el.textContent=text;
+  el.className='msg'+(type?' '+type:'');
+}
+</script>
+</body>
+</html>
