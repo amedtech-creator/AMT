@@ -19,7 +19,9 @@
 
 <script type="module">
   import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, fetchSignInMethodsForEmail }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { initializeApp as _initSecondaryApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, get, onValue, off, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
   // ★ Firebase 설정 하드코딩 — 어느 기기에서든 자동 연결
@@ -67,7 +69,15 @@
       }
     });
   } catch(e){ console.warn('Firebase init failed', e); }
-  window._fb = { db, ref, set, get, onValue, off, remove, ready: firebaseReady };
+  window._fb = { db, auth, ref, set, get, onValue, off, remove, ready: firebaseReady };
+  // 대리점 계정 생성용 헬퍼를 전역 공개
+  window._firebaseHelpers = {
+    savedCfg,
+    initSecondaryApp: _initSecondaryApp,
+    getAuth,
+    createUserWithEmailAndPassword,
+    fetchSignInMethodsForEmail
+  };
 </script>
 
 <style>
@@ -1553,6 +1563,16 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
           <option value="eom_next">다음달 말일</option>
           <option value="3m_19">3개월 뒤 19일</option>
         </select>
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group" style="flex:2;min-width:200px">
+        <label>이메일 <span class="req">*</span> <span style="font-size:.7rem;color:var(--text3);font-weight:400">(KY 주문 로그인용)</span></label>
+        <input type="email" id="dmEmail" placeholder="example@naver.com">
+      </div>
+      <div class="form-group">
+        <label>코드번호 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(로그인 비밀번호)</span></label>
+        <input type="text" id="dmCode" placeholder="숫자 또는 영문">
       </div>
     </div>
     <div class="form-grid">
@@ -4135,6 +4155,8 @@ function openDealerModal(id=null){
 
   // 초기화
   document.getElementById('dmName').value='';
+  document.getElementById('dmEmail').value='';
+  document.getElementById('dmCode').value='';
   document.getElementById('dmTerm').value='same';
   document.getElementById('dmFee').value='0';
   document.getElementById('dmNote').value='';
@@ -4144,6 +4166,8 @@ function openDealerModal(id=null){
     const d=getDealerById(id);
     if(d){
       document.getElementById('dmName').value=d.name;
+      document.getElementById('dmEmail').value=d.email||'';
+      document.getElementById('dmCode').value=d.code||'';
       document.getElementById('dmTerm').value=d.term;
       document.getElementById('dmFee').value=d.fee||0;
       document.getElementById('dmNote').value=d.note||'';
@@ -4188,16 +4212,64 @@ function addDmProduct(prod='',price='',priceOld='',priceOldUntil=''){
   wrap.appendChild(row);
 }
 
+
+// ═══════════════════════════════════════════════════════
+//  대리점 Firebase Auth 계정 자동 생성/갱신
+//  - 관리자 로그인 유지를 위해 "보조 앱 인스턴스"를 사용
+// ═══════════════════════════════════════════════════════
+let _dealerAuxApp = null, _dealerAuxAuth = null;
+function getDealerAuxAuth(){
+  if(_dealerAuxAuth) return _dealerAuxAuth;
+  const H = window._firebaseHelpers;
+  if(!H) throw new Error('Firebase 도우미 미초기화');
+  const cfg = H.savedCfg || JSON.parse(localStorage.getItem('amt_firebase_cfg')||'{}');
+  if(!cfg.apiKey) throw new Error('Firebase 설정 없음');
+  _dealerAuxApp = H.initSecondaryApp({
+    apiKey: cfg.apiKey, authDomain: cfg.authDomain,
+    projectId: cfg.projectId, databaseURL: cfg.databaseURL,
+    storageBucket: cfg.storageBucket, messagingSenderId: cfg.messagingSenderId, appId: cfg.appId
+  }, 'dealer-aux-' + Date.now());
+  _dealerAuxAuth = H.getAuth(_dealerAuxApp);
+  return _dealerAuxAuth;
+}
+
+async function ensureDealerAuthAccount(email, code){
+  if(!email || !code) return false;
+  const H = window._firebaseHelpers;
+  if(!H) throw new Error('Firebase 도우미 미초기화');
+  const auxAuth = getDealerAuxAuth();
+  // 기존 이메일 존재 여부 확인
+  try{
+    const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
+    if(methods && methods.length > 0){
+      console.log('[Auth] 기존 계정 존재:', email);
+      toast('⚠️ '+email+' Auth 계정 이미 존재 (코드 변경 불가)','info');
+      return true;
+    }
+  }catch(e){ console.warn('이메일 조회 실패', e); }
+  // 신규 계정 생성
+  await H.createUserWithEmailAndPassword(auxAuth, email, code);
+  console.log('[Auth] 대리점 계정 생성 완료:', email);
+  toast('✅ 대리점 로그인 계정 생성: '+email,'success');
+  return true;
+}
+
 async function saveDealer(){
   await requireOtp('대리점 저장/수정', async () => { await _doSaveDealer(); });
 }
 async function _doSaveDealer(){
   const name=document.getElementById('dmName').value.trim();
+  const email=document.getElementById('dmEmail').value.trim().toLowerCase();
+  const code=document.getElementById('dmCode').value.trim();
   const term=document.getElementById('dmTerm').value;
   const fee=parseInt(document.getElementById('dmFee').value)||0;
   const note=document.getElementById('dmNote').value.trim();
 
   if(!name){ toast('대리점명을 입력하세요','error'); return; }
+  if(!email){ toast('이메일을 입력하세요 (KY 주문 로그인용)','error'); return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toast('이메일 형식이 올바르지 않습니다','error'); return; }
+  if(!editingDealerId && !code){ toast('신규 대리점은 코드번호를 설정해야 합니다','error'); return; }
+  if(code && code.length < 4){ toast('코드번호는 4자 이상이어야 합니다','error'); return; }
 
   const prods=[];
   document.querySelectorAll('#dmProducts .form-grid').forEach(row=>{
@@ -4219,17 +4291,27 @@ async function _doSaveDealer(){
 
   if(editingDealerId){
     const d=getDealerById(editingDealerId);
-    addAuditLog('edit','대리점',`수정: ${d.name} → ${name}`);
-    // ★ code 필드 반드시 보존 (덮어쓰지 않음)
-    const existingCode = d.code || '';
-    Object.assign(d,{name,term,fee,note,products:prods});
-    if(existingCode) d.code = existingCode;
+    addAuditLog('edit','대리점',`수정: ${d.name} → ${name} (이메일: ${email})`);
+    const finalCode = code || d.code || '';
+    Object.assign(d,{name,email,code:finalCode,term,fee,note,products:prods});
     await fbSaveDoc('dealers',d.id,d);
+    // Firebase Auth 계정 업데이트 (코드 변경 시)
+    if(code && code !== d.code){
+      await ensureDealerAuthAccount(email, code).catch(e => {
+        console.warn('Auth 계정 업데이트 실패', e);
+        toast('⚠️ Auth 계정 갱신 실패 - 수동 확인 필요','error');
+      });
+    }
   } else {
-    const d={id:'d_'+Date.now(),name,term,fee,note,products:prods,code:''};
+    const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods};
     dealers.push(d);
-    addAuditLog('create','대리점',`추가: ${name}`);
+    addAuditLog('create','대리점',`추가: ${name} (이메일: ${email})`);
     await fbSaveDoc('dealers',d.id,d);
+    // Firebase Auth 계정 생성
+    await ensureDealerAuthAccount(email, code).catch(e => {
+      console.warn('Auth 계정 생성 실패', e);
+      toast('⚠️ Auth 계정 생성 실패: '+e.message+' (이메일이 이미 등록되었을 수 있음)','error');
+    });
   }
 
   saveLS();
