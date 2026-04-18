@@ -54,7 +54,7 @@
     </div>
     <div class="field">
       <label>코드번호</label>
-      <input type="password" id="pw" placeholder="코드번호 입력" autocomplete="current-password"
+      <input type="password" id="pw" placeholder="코드번호 입력" autocomplete="off"
         onkeydown="if(event.key==='Enter')doLogin()">
     </div>
     <div class="remember-row">
@@ -116,9 +116,7 @@ let _pendingEmail='', _pendingOtpCode='', _otpExpiry=0, _timerInterval=null;
 // ─── 저장된 이메일/비밀번호 자동입력 ──────────────────────
 (function restoreSaved(){
   const em = localStorage.getItem(SAVED_EMAIL)||'';
-  const pw = localStorage.getItem(SAVED_PW)||'';
   if(em) document.getElementById('email').value = em;
-  if(pw) document.getElementById('pw').value = pw;
 })();
 
 // ─── Auth 상태 감지 ────────────────────────────────────────
@@ -220,7 +218,6 @@ window.verifyOtp = async () => {
   if(document.getElementById('rememberMe').checked){
     localStorage.setItem(DEVICE_KEY, user.uid);
     localStorage.setItem(SAVED_EMAIL, _pendingEmail);
-    // 비밀번호는 이미 저장됨
   }
   set(ref(db,'amt_otp/'+btoa(_pendingEmail).replace(/=/g,'')),null).catch(()=>{});
 
