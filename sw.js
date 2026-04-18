@@ -1,1 +1,0 @@
-const V='v10'; self.addEventListener('install', () => self.skipWaiting());
