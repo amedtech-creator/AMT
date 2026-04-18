@@ -5930,7 +5930,7 @@ async function kyPurgeOldHistory(){
     for(const id of toDelete){
       try{ await fb.set(fb.ref(fb.db, 'ky_orders_history/'+id), null); }catch(e){}
     }
-    if(toDelete.length)
+    if(toDelete.length) console.log(`[kyPurgeOldHistory] ${toDelete.length}건 삭제 완료`);
   }catch(e){ console.warn('히스토리 자동삭제 실패:', e); }
 }
 
@@ -7799,7 +7799,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260418-v10').catch(()=>{});
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v11').catch(()=>{});
   });
 }
 </script>
