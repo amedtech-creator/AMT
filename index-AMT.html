@@ -37,6 +37,10 @@
     .btn.loading .btn-text{opacity:0}
   </style>
   <!-- EmailJS -->
+  <!-- ★ Firebase SDK preconnect (DNS/TCP/TLS 핸드셰이크 선행) -->
+  <link rel="preconnect" href="https://www.gstatic.com">
+  <link rel="preconnect" href="https://amt-ky-default-rtdb.asia-southeast1.firebasedatabase.app">
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body>
@@ -108,7 +112,6 @@ const ADMINS      = { 'kyunghoyou@gmail.com':'super', 'amedtech@gmail.com':'admi
 const DEVICE_KEY  = 'amt_trusted_device';
 const SESSION_KEY = 'amt_auth_session';
 const SAVED_EMAIL = 'amt_saved_email';
-const SAVED_PW    = 'amt_saved_pw';
 
 const app  = getApps().find(a=>a.name==='amt-order') || initializeApp(FB_CFG, 'amt-order');
 const auth = getAuth(app);
@@ -129,7 +132,11 @@ onAuthStateChanged(auth, async (user) => {
   if(!role){ auth.signOut(); return; }
 
   // 신뢰된 기기면 바로 이동
-  if(localStorage.getItem(DEVICE_KEY) === user.uid){
+  // 기기 신뢰 + 30일 만료 체크
+  const trustedUid = localStorage.getItem(DEVICE_KEY);
+  const trustedExp = parseInt(localStorage.getItem(DEVICE_KEY + '_exp')||'0', 10);
+  const isTrusted = trustedUid === user.uid && Date.now() < trustedExp;
+  if(isTrusted){
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({email:user.email, role, uid:user.uid}));
     location.replace('orders-admin-AMT.html');
     return;
@@ -239,7 +246,9 @@ window.verifyOtp = async () => {
 
   // 기기 신뢰 + 자동완성 저장
   if(document.getElementById('rememberMe').checked){
+    // 기기 신뢰: UID + 만료시점(30일 후)
     localStorage.setItem(DEVICE_KEY, user.uid);
+    localStorage.setItem(DEVICE_KEY + '_exp', String(Date.now() + 30*24*60*60*1000));
     localStorage.setItem(SAVED_EMAIL, _pendingEmail);
   }
   set(ref(db,'amt_otp/'+btoa(_pendingEmail).replace(/=/g,'')),null).catch(()=>{});
