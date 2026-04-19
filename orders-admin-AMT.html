@@ -19,7 +19,7 @@
 
 <script type="module">
   import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, fetchSignInMethodsForEmail }
+  import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, fetchSignInMethodsForEmail }
     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { initializeApp as _initSecondaryApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, get, onValue, off, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -84,6 +84,7 @@
     initSecondaryApp: _initSecondaryApp,
     getAuth,
     createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
     fetchSignInMethodsForEmail
   };
 </script>
@@ -4366,24 +4367,32 @@ async function ensureDealerAuthAccount(email, code){
   if(!H) throw new Error('Firebase 도우미 미초기화');
   const auxAuth = getDealerAuxAuth();
   const pw = _dummyAuthPw(email);
+  // ★ signIn으로 먼저 존재 여부 확인 (fetchSignInMethodsForEmail 대신)
   try{
-    const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
-    if(methods && methods.length > 0){
-      console.log('[Auth] 대리점 계정 이미 존재:', email);
-      return true;  // 이미 Auth 있음 (기존 사용자)
-    }
-  }catch(e){ console.warn('이메일 조회 실패', e); }
-  try{
-    await H.createUserWithEmailAndPassword(auxAuth, email, pw);
-    console.log('[Auth] 대리점 계정 생성 완료:', email);
-    toast('✅ 대리점 로그인 계정 생성: '+email,'success');
+    await H.signInWithEmailAndPassword(auxAuth, email, pw);
+    console.log('[Auth] 대리점 계정 이미 존재:', email);
+    try{ if(auxAuth.signOut) await auxAuth.signOut(); }catch(e){}
     return true;
   }catch(e){
-    if(String(e.message||'').includes('email-already-in-use')){
-      console.log('[Auth] 이미 존재:', email);
+    const ec = e.code || '';
+    if(ec.includes('wrong-password') || ec.includes('invalid-credential')){
+      console.warn('[Auth] 대리점 계정 존재하나 옛 비밀번호:', email);
       return true;
     }
-    console.warn('대리점 Auth 생성 실패', e);
+    if(ec.includes('user-not-found') || ec.includes('invalid-email') || !ec){
+      try{
+        await H.createUserWithEmailAndPassword(auxAuth, email, pw);
+        console.log('[Auth] 대리점 계정 신규 생성 완료:', email);
+        toast('✅ 대리점 로그인 계정 생성: '+email,'success');
+        try{ if(auxAuth.signOut) await auxAuth.signOut(); }catch(e){}
+        return true;
+      }catch(ce){
+        if(String(ce.message||'').includes('email-already-in-use')) return true;
+        console.warn('대리점 Auth 생성 실패', ce);
+        return false;
+      }
+    }
+    console.warn('대리점 Auth 상태 확인 실패', e);
     return false;
   }
 }
@@ -4395,20 +4404,34 @@ async function ensureAuthAccount(email, code, displayName){
   if(!H) throw new Error('Firebase 도우미 미초기화');
   const auxAuth = getDealerAuxAuth();
   const pw = _dummyAuthPw(email);
+  // ★ signIn으로 먼저 존재 여부 확인 (fetchSignInMethodsForEmail 대신)
   try{
-    const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
-    if(methods && methods.length > 0){
-      console.log('[Auth] 계정 이미 존재:', email);
-      return true;
-    }
-  }catch(e){ console.warn('이메일 조회 실패', e); }
-  try{
-    await H.createUserWithEmailAndPassword(auxAuth, email, pw);
-    console.log('[Auth] 계정 생성 완료:', email, displayName||'');
-    return true;
+    await H.signInWithEmailAndPassword(auxAuth, email, pw);
+    console.log('[Auth] 계정 이미 존재 (signIn 성공):', email);
+    // 보조 Auth 정리 (옵션 - 다음 작업에 영향 주지 않게)
+    try{ if(auxAuth.signOut) await auxAuth.signOut(); }catch(e){}
+    return true;  // 계정 있고 더미PW도 맞음
   }catch(e){
-    if(String(e.message||'').includes('email-already-in-use')) return true;
-    console.warn('Auth 생성 실패', e);
+    const ec = e.code || '';
+    // 비밀번호 틀림 → 계정은 있는데 옛 코드로 생성된 경우 (마이그레이션 필요)
+    if(ec.includes('wrong-password') || ec.includes('invalid-credential')){
+      console.warn('[Auth] 계정 존재하나 옛 비밀번호 - 수동 마이그레이션 필요:', email);
+      return true;  // 일단 있다고 간주 (signIn 대신 Firebase Console에서 삭제 후 재생성 필요)
+    }
+    // 계정 없음 → 새로 생성
+    if(ec.includes('user-not-found') || ec.includes('invalid-email') || !ec){
+      try{
+        await H.createUserWithEmailAndPassword(auxAuth, email, pw);
+        console.log('[Auth] 계정 신규 생성 완료:', email, displayName||'');
+        try{ if(auxAuth.signOut) await auxAuth.signOut(); }catch(e){}
+        return true;
+      }catch(ce){
+        if(String(ce.message||'').includes('email-already-in-use')) return true;
+        console.warn('Auth 생성 실패', ce);
+        return false;
+      }
+    }
+    console.warn('Auth 상태 확인 실패', e);
     return false;
   }
 }
@@ -4944,7 +4967,7 @@ function migrateDueDates(){
 }
 
 /* ═══════════════════════════════════════════════════════
-   ★★★ 동시성 안전 저장 (v13) ★★★
+   ★★★ 동시성 안전 저장 (v14) ★★★
    여러 관리자가 동시에 같은 데이터를 수정해도 안전하도록:
    1) 삭제 추적 - 내가 삭제한 ID를 기억해서 merge 때 되살아나지 않게
    2) 읽기→병합→쓰기를 순차 처리 (최신 remote 기준으로 내 변경만 적용)
@@ -8070,7 +8093,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v13')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v14')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
