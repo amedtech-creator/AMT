@@ -4944,7 +4944,7 @@ function migrateDueDates(){
 }
 
 /* ═══════════════════════════════════════════════════════
-   ★★★ 동시성 안전 저장 (v12) ★★★
+   ★★★ 동시성 안전 저장 (v13) ★★★
    여러 관리자가 동시에 같은 데이터를 수정해도 안전하도록:
    1) 삭제 추적 - 내가 삭제한 ID를 기억해서 merge 때 되살아나지 않게
    2) 읽기→병합→쓰기를 순차 처리 (최신 remote 기준으로 내 변경만 적용)
@@ -7137,14 +7137,12 @@ async function saveOneAdminCode(email, name){
       await ensureAuthAccount(email, newCode, adminName);
     }catch(e){ console.warn('Auth 계정 보장 실패', e); }
 
-    // ① amt_admins (주 저장소 - 이메일 기반 풍부한 정보)
+    // ★ amt_admins (단일 저장소 - 이메일 기반 풍부한 정보)
+    // amt_pw는 더 이상 사용하지 않음 (키에 한글/특수문자 쓸 때 Firebase 오류 발생)
     await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
       email, name:adminName, code:newCode, role,
       updatedAt: new Date().toISOString()
     });
-
-    // ② amt_pw (KY admin 로그인 호환용 - {이름: 코드} 맵)
-    await fb.set(fb.ref(fb.db,'amt_pw/'+adminName), newCode);
 
     if(saveBtn){
       saveBtn.disabled = false;
@@ -7192,18 +7190,7 @@ async function deleteAdminCode(email){
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
   const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
-
-  // amt_admins에서 이름 찾아서 amt_pw도 같이 삭제
-  let adminName = '';
-  try{
-    const snap = await fb.get(fb.ref(fb.db,'amt_admins/'+key));
-    if(snap.exists()) adminName = snap.val().name || '';
-  }catch(e){}
-
   await fb.set(fb.ref(fb.db,'amt_admins/'+key), null);
-  if(adminName){
-    await fb.set(fb.ref(fb.db,'amt_pw/'+adminName), null).catch(()=>{});
-  }
   toast(email+' 삭제됨','info');
   loadAdminCodes();
 }
@@ -8083,7 +8070,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v12')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v13')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
