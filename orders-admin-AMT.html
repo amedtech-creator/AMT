@@ -4353,45 +4353,65 @@ function getDealerAuxAuth(){
   return _dealerAuxAuth;
 }
 
+// ★★★ 더미PW 기반 Auth 계정 관리 ★★★
+// 실제 코드는 DB에 저장, Auth 비밀번호는 이메일 기반 고정값
+function _dummyAuthPw(email){
+  return 'amtky2026_' + (email||'').toLowerCase().replace(/[^a-z0-9]/g,'_') + '_x';
+}
+
 async function ensureDealerAuthAccount(email, code){
-  if(!email || !code) return false;
+  // code 파라미터는 DB 저장용이며 Auth에는 사용되지 않음 (더미PW 사용)
+  if(!email) return false;
   const H = window._firebaseHelpers;
   if(!H) throw new Error('Firebase 도우미 미초기화');
   const auxAuth = getDealerAuxAuth();
-  // 기존 이메일 존재 여부 확인
+  const pw = _dummyAuthPw(email);
   try{
     const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
     if(methods && methods.length > 0){
-      console.log('[Auth] 기존 계정 존재:', email);
-      toast('⚠️ '+email+' Auth 계정 이미 존재 (코드 변경 불가)','info');
+      console.log('[Auth] 대리점 계정 이미 존재:', email);
+      return true;  // 이미 Auth 있음 (기존 사용자)
+    }
+  }catch(e){ console.warn('이메일 조회 실패', e); }
+  try{
+    await H.createUserWithEmailAndPassword(auxAuth, email, pw);
+    console.log('[Auth] 대리점 계정 생성 완료:', email);
+    toast('✅ 대리점 로그인 계정 생성: '+email,'success');
+    return true;
+  }catch(e){
+    if(String(e.message||'').includes('email-already-in-use')){
+      console.log('[Auth] 이미 존재:', email);
+      return true;
+    }
+    console.warn('대리점 Auth 생성 실패', e);
+    return false;
+  }
+}
+
+async function ensureAuthAccount(email, code, displayName){
+  // code 파라미터는 DB 저장용, Auth에는 더미PW 사용
+  if(!email) return false;
+  const H = window._firebaseHelpers;
+  if(!H) throw new Error('Firebase 도우미 미초기화');
+  const auxAuth = getDealerAuxAuth();
+  const pw = _dummyAuthPw(email);
+  try{
+    const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
+    if(methods && methods.length > 0){
+      console.log('[Auth] 계정 이미 존재:', email);
       return true;
     }
   }catch(e){ console.warn('이메일 조회 실패', e); }
-  // 신규 계정 생성
-  await H.createUserWithEmailAndPassword(auxAuth, email, code);
-  console.log('[Auth] 대리점 계정 생성 완료:', email);
-  toast('✅ 대리점 로그인 계정 생성: '+email,'success');
-  return true;
-}
-
-// ★ 관리자/대리점 공통 Auth 계정 생성 헬퍼 (window._firebaseHelpers.ensureAuthAccount로 노출)
-async function ensureAuthAccount(email, code, displayName){
-  if(!email || !code) return false;
-  const H = window._firebaseHelpers;
-  if(!H) throw new Error('Firebase 도우미 미초기화');
-  const auxAuth = getDealerAuxAuth();
   try{
-    const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
-    if(methods && methods.length > 0){
-      console.log('[Auth] 기존 계정 존재:', email);
-      return true; // 이미 존재 (비밀번호 변경은 불가)
-    }
-  }catch(e){ console.warn('이메일 조회 실패', e); }
-  await H.createUserWithEmailAndPassword(auxAuth, email, code);
-  console.log('[Auth] 계정 생성 완료:', email, displayName||'');
-  return true;
+    await H.createUserWithEmailAndPassword(auxAuth, email, pw);
+    console.log('[Auth] 계정 생성 완료:', email, displayName||'');
+    return true;
+  }catch(e){
+    if(String(e.message||'').includes('email-already-in-use')) return true;
+    console.warn('Auth 생성 실패', e);
+    return false;
+  }
 }
-// 전역 노출
 if(window._firebaseHelpers){
   window._firebaseHelpers.ensureAuthAccount = ensureAuthAccount;
 }
@@ -4442,18 +4462,29 @@ async function _doSaveDealer(){
     const d=getDealerById(editingDealerId);
     addAuditLog('edit','대리점',`수정: ${d.name} → ${name} (이메일: ${email})`);
     const finalCode = code || d.code || '';
+    const oldEmail = d.email;
     Object.assign(d,{name,email,code:finalCode,term,fee,note,products:prods});
     await fbSaveDoc('dealers',d.id,d);
-    // ★ Firebase Auth 로직 제거됨 - 코드는 DB(dealers[].code)로만 검증
-    // 대리점이 다음 로그인할 때 index-KY.html이 DB의 code와 비교하므로 즉시 반영됨
+    // ★ 이메일이 바뀌었거나 새 이메일이면 Auth 계정 생성 (더미PW)
+    if(email && email !== oldEmail){
+      await ensureDealerAuthAccount(email, finalCode).catch(e => {
+        console.warn('Auth 계정 생성 실패', e);
+      });
+    }
+    // ★ 코드 변경 시 Auth는 건드릴 필요 없음 (DB가 소스)
     if(code && code !== d.code){
-      toast('✅ 코드 변경됨 - 다음 로그인부터 새 코드 적용','info');
+      toast('✅ 코드 변경됨 - 즉시 다음 로그인부터 적용','info');
     }
   } else {
     const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods};
     dealers.push(d);
     addAuditLog('create','대리점',`추가: ${name} (이메일: ${email})`);
     await fbSaveDoc('dealers',d.id,d);
+    // ★ 신규 대리점은 Auth 계정 자동 생성 (더미PW)
+    await ensureDealerAuthAccount(email, code).catch(e => {
+      console.warn('Auth 계정 생성 실패', e);
+      toast('⚠️ Auth 계정 생성 실패 - 로그인 안 될 수 있음: '+e.message,'error');
+    });
     toast('✅ 신규 대리점 등록 - 즉시 로그인 가능','success');
   }
 
@@ -7097,10 +7128,14 @@ async function saveOneAdminCode(email, name){
   const isMine = email === myEmail;
 
   try{
-    // ★ Firebase Auth 로직 제거 - DB만으로 관리
     const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
     const adminName = name || email;
     const role = email==='kyunghoyou@gmail.com'?'super':'admin';
+
+    // ★ Auth 계정 보장 (더미PW 방식 - 계정 없으면 생성, 있으면 건드리지 않음)
+    try{
+      await ensureAuthAccount(email, newCode, adminName);
+    }catch(e){ console.warn('Auth 계정 보장 실패', e); }
 
     // ① amt_admins (주 저장소 - 이메일 기반 풍부한 정보)
     await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
@@ -7109,7 +7144,6 @@ async function saveOneAdminCode(email, name){
     });
 
     // ② amt_pw (KY admin 로그인 호환용 - {이름: 코드} 맵)
-    // ★ 이름이 바뀐 경우 옛날 키 삭제는 renderAdminCodeList에서 동기화로 처리
     await fb.set(fb.ref(fb.db,'amt_pw/'+adminName), newCode);
 
     if(saveBtn){
