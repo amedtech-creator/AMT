@@ -3,10 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <!-- ★ 외부 리소스 빠른 연결 (DNS/TLS 핸드셰이크 선행) -->
-  <link rel="preconnect" href="https://www.gstatic.com">
-  <link rel="preconnect" href="https://amt-ky-default-rtdb.asia-southeast1.firebasedatabase.app">
-  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <title>AMT · 매출관리 시스템</title>
 
 <!-- PWA -->
@@ -67,6 +63,7 @@
     // ★ Auth 상태 감지 — 초기화 후 실제 로그아웃 시에만 리다이렉트
     let _authInitialized = false;
     onAuthStateChanged(auth, (user) => {
+      console.log('[AMT admin] Auth 상태:', user ? user.email : 'null');
       if(!_authInitialized){ _authInitialized = true; return; }
       if(!user){
         const sess = sessionStorage.getItem('amt_auth_session');
@@ -1603,14 +1600,24 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
           <option value="eom">발주월 말일</option>
           <option value="eom_next">다음달 말일</option>
           <option value="3m_19">3개월 뒤 19일</option>
-          <option value="custom">📅 날짜 직접 지정</option>
+          <option value="custom">📅 직접 지정 (월+일)</option>
         </select>
       </div>
     </div>
-    <div class="form-grid" id="dmCustomDateRow" style="display:none">
+    <!-- ★ Fix 3: custom 선택 시만 보이는 월+일 UI -->
+    <div class="form-grid" id="dmCustomRow" style="display:none">
       <div class="form-group">
-        <label>수금 지정 날짜 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(YYYY-MM-DD 형식, 휴일이면 다음 영업일로 자동 조정)</span></label>
-        <input type="date" id="dmCustomDate">
+        <label>언제</label>
+        <select id="dmCustomMode">
+          <option value="same">주문 당월</option>
+          <option value="next">다음 달</option>
+          <option value="plus2">2개월 뒤</option>
+          <option value="plus3">3개월 뒤</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>며칠 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(1~31, 휴일이면 다음 영업일로 자동 조정)</span></label>
+        <input type="number" id="dmCustomDay" min="1" max="31" placeholder="19">
       </div>
     </div>
     <div class="form-grid">
@@ -2051,12 +2058,27 @@ function calcDue(orderDate, term, dealerId){
   if(dealerId==='chungu'||term==='3m_19'){
     const due=parseDateLocal(orderDate);
     due.setMonth(due.getMonth()+3); due.setDate(19);
-    return nextBizDay(fmtDateLocal(due)); // ★ 19일이 토/일/공휴일이면 다음 영업일로
+    return nextBizDay(fmtDateLocal(due)); // ★ Fix 2: 휴일이면 다음 영업일
   }
-  // ★ custom:YYYY-MM-DD 형식 지원 (대리점별 고정 날짜)
+  // ★ Fix 3: custom:MODE:N 형식 (주문당월/다음달/2개월후 며칠)
   if(typeof term === 'string' && term.startsWith('custom:')){
-    const customDate = term.slice(7).trim();
-    if(customDate) return nextBizDay(customDate);
+    const parts = term.split(':');
+    // custom:same:15 = 주문당월 15일
+    // custom:next:10 = 다음달 10일
+    // custom:plus2:19 = 2개월후 19일
+    // custom:plus3:19 = 3개월후 19일
+    if(parts.length === 3){
+      const mode = parts[1], day = parseInt(parts[2], 10);
+      if(day >= 1 && day <= 31){
+        const due = parseDateLocal(orderDate);
+        if(mode === 'same'){ /* 당월 */ }
+        else if(mode === 'next') due.setMonth(due.getMonth()+1);
+        else if(mode === 'plus2') due.setMonth(due.getMonth()+2);
+        else if(mode === 'plus3') due.setMonth(due.getMonth()+3);
+        due.setDate(day);
+        return nextBizDay(fmtDateLocal(due));
+      }
+    }
   }
   switch(term){
     case 'same':      return orderDate;
@@ -2689,7 +2711,7 @@ async function _doDelOrder(id){
 
   if(relKyId && relKyProduct){
     try{
-      // ★ 양쪽 경로 모두 확인 후 syncKyOrderLine이 알아서 처리
+      // ★ syncKyOrderLine이 ky_orders + ky_orders_history 양쪽 자동 처리
       await syncKyOrderLine(relKyId, relKyProduct, {
         deleteLine: true,
         relAmtOrder: id,
@@ -2792,7 +2814,7 @@ async function saveOrderEdit(){
     const kyProduct = o.relKyProduct || o.product;
     if(kyOrderId){
       try{
-        // ★ syncKyOrderLine이 양쪽(ky_orders, ky_orders_history) 확인
+        // ★ syncKyOrderLine이 양쪽 경로 자동 처리
         if(!o.relKyOrder){ o.relKyOrder = kyOrderId; }
         await syncKyOrderLine(kyOrderId, kyProduct, {
           qty: newQty,
@@ -4183,9 +4205,11 @@ let editingDealerId=null;
 
 function renderDealerCards(){
   const termLabels={same:'발주당일',same_next:'당일/다음날',eom:'발주월 말일',eom_next:'다음달 말일','3m_19':'3개월 뒤 19일'};
+  const modeLabels={same:'주문당월',next:'다음달',plus2:'2개월 뒤',plus3:'3개월 뒤'};
   const termDisplay = (term) => {
     if(typeof term === 'string' && term.startsWith('custom:')){
-      return '지정 ' + term.slice(7);
+      const cp = term.split(':');
+      return (modeLabels[cp[1]]||cp[1]) + ' ' + (cp[2]||'') + '일';
     }
     return termLabels[term] || term;
   };
@@ -4203,7 +4227,7 @@ function renderDealerCards(){
       </div>
       <div class="dealer-products">${d.products.map(p=>`<span class="badge" style="background:${pColors[p.product]||'var(--gray)'}20;color:${pColors[p.product]||'var(--gray)'}">${p.product} ${fmt(p.price)}원</span>`).join('')}</div>
       <div class="dealer-info">
-        <span>💳 ${termLabels[d.term]||d.term}</span>
+        <span>💳 ${termDisplay(d.term)}</span>
         ${d.fee>0?`<span>📦 택배비 ${fmt(d.fee)}원</span>`:''}
         ${d.note?`<span>📝 ${d.note}</span>`:''}
       </div>
@@ -4221,8 +4245,9 @@ function openDealerModal(id=null){
   document.getElementById('dmEmail').value='';
   document.getElementById('dmCode').value='';
   document.getElementById('dmTerm').value='same';
-  document.getElementById('dmCustomDate').value='';
-  document.getElementById('dmCustomDateRow').style.display='none';
+  document.getElementById('dmCustomRow').style.display='none';
+  document.getElementById('dmCustomMode').value='same';
+  document.getElementById('dmCustomDay').value='';
   document.getElementById('dmFee').value='0';
   document.getElementById('dmNote').value='';
   document.getElementById('dmProducts').innerHTML='';
@@ -4233,11 +4258,13 @@ function openDealerModal(id=null){
       document.getElementById('dmName').value=d.name;
       document.getElementById('dmEmail').value=d.email||'';
       document.getElementById('dmCode').value=d.code||'';
-      // ★ custom:YYYY-MM-DD 형식 파싱
+      // ★ Fix 3: custom:MODE:N 파싱
       if(typeof d.term === 'string' && d.term.startsWith('custom:')){
-        document.getElementById('dmTerm').value='custom';
-        document.getElementById('dmCustomDate').value=d.term.slice(7);
-        document.getElementById('dmCustomDateRow').style.display='flex';
+        const cp = d.term.split(':');
+        document.getElementById('dmTerm').value = 'custom';
+        document.getElementById('dmCustomMode').value = cp[1] || 'same';
+        document.getElementById('dmCustomDay').value = cp[2] || '';
+        document.getElementById('dmCustomRow').style.display = 'flex';
       } else {
         document.getElementById('dmTerm').value=d.term;
       }
@@ -4252,10 +4279,10 @@ function openDealerModal(id=null){
   modal.classList.add('open');
 }
 
-// ★ custom 날짜 필드 표시/숨김
+// ★ Fix 3: custom 옵션 선택 시 월+일 UI 표시/숨김
 function toggleDmCustomDate(){
   const v = document.getElementById('dmTerm').value;
-  document.getElementById('dmCustomDateRow').style.display = (v==='custom') ? 'flex' : 'none';
+  document.getElementById('dmCustomRow').style.display = (v === 'custom') ? 'flex' : 'none';
 }
 
 function closeDealerModal(){ document.getElementById('dealerModal').classList.remove('open'); }
@@ -4320,12 +4347,14 @@ async function ensureDealerAuthAccount(email, code){
   try{
     const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
     if(methods && methods.length > 0){
+      console.log('[Auth] 기존 계정 존재:', email);
       toast('⚠️ '+email+' Auth 계정 이미 존재 (코드 변경 불가)','info');
       return true;
     }
   }catch(e){ console.warn('이메일 조회 실패', e); }
   // 신규 계정 생성
   await H.createUserWithEmailAndPassword(auxAuth, email, code);
+  console.log('[Auth] 대리점 계정 생성 완료:', email);
   toast('✅ 대리점 로그인 계정 생성: '+email,'success');
   return true;
 }
@@ -4339,10 +4368,12 @@ async function ensureAuthAccount(email, code, displayName){
   try{
     const methods = await H.fetchSignInMethodsForEmail(auxAuth, email);
     if(methods && methods.length > 0){
+      console.log('[Auth] 기존 계정 존재:', email);
       return true; // 이미 존재 (비밀번호 변경은 불가)
     }
   }catch(e){ console.warn('이메일 조회 실패', e); }
   await H.createUserWithEmailAndPassword(auxAuth, email, code);
+  console.log('[Auth] 계정 생성 완료:', email, displayName||'');
   return true;
 }
 // 전역 노출
@@ -4358,11 +4389,12 @@ async function _doSaveDealer(){
   const email=document.getElementById('dmEmail').value.trim().toLowerCase();
   const code=document.getElementById('dmCode').value.trim();
   let term=document.getElementById('dmTerm').value;
-  // ★ custom 날짜 처리
+  // ★ Fix 3: custom 선택 시 mode:day로 조립
   if(term === 'custom'){
-    const cd = document.getElementById('dmCustomDate').value;
-    if(!cd){ toast('수금 지정 날짜를 입력하세요','error'); return; }
-    term = 'custom:' + cd;
+    const mode = document.getElementById('dmCustomMode').value;
+    const day = parseInt(document.getElementById('dmCustomDay').value, 10);
+    if(!day || day < 1 || day > 31){ toast('수금일(1~31)을 올바르게 입력하세요','error'); return; }
+    term = 'custom:' + mode + ':' + day;
   }
   const fee=parseInt(document.getElementById('dmFee').value)||0;
   const note=document.getElementById('dmNote').value.trim();
@@ -4673,6 +4705,7 @@ async function fbBackupToday(force=false){
     localStorage.setItem('amt_lastBackup', ds);
     // 1년 이전 백업 자동 삭제
     await fbPurgeOldBackups();
+    console.log('[백업] '+ds+' 백업 완료');
   }catch(e){ console.warn('백업 실패',e); }
 }
 
@@ -4697,6 +4730,7 @@ async function fbPurgeOldBackups(){
     for(const k of keys){
       if(k < cutoffStr){
         await fb.set(fb.ref(fb.db,'amt_backup/'+k), null);
+        console.log('[백업정리] '+k+' 삭제');
       }
     }
   }catch(e){ console.warn('백업 정리 실패',e); }
@@ -5930,7 +5964,7 @@ async function kyPurgeOldHistory(){
     for(const id of toDelete){
       try{ await fb.set(fb.ref(fb.db, 'ky_orders_history/'+id), null); }catch(e){}
     }
-    if(toDelete.length) console.log(`[kyPurgeOldHistory] ${toDelete.length}건 삭제 완료`);
+    if(toDelete.length) console.log('[KY 히스토리] 1년 경과 '+toDelete.length+'건 자동 삭제');
   }catch(e){ console.warn('히스토리 자동삭제 실패:', e); }
 }
 
@@ -6144,9 +6178,9 @@ function kyAdminRefresh(){
   }).catch(e=>toast('실패: '+e.message,'error'));
 }
 
-function kyUpdateKpi(){} // KPI 패널 제거됨
+function kyUpdateKpi(list){ /* KPI 패널 제거됨 */ }
 
-function kyUpdateDealerFilter(){} // 필터 제거됨
+function kyUpdateDealerFilter(){ /* 필터 제거됨 */ }
 
 function kyApplyFilter(){ kyRenderOrders(kyAllOrders); }
 
@@ -6262,77 +6296,71 @@ function applyLocalKyOrderRemoval(orderId){
 }
 
 /* ═══════════════════════════════════════════════════════
-   ★ AMT ↔ KY 양방향 동기화 헬퍼 (질문 1)
-   - AMT에서 발주 수정/삭제 시 KY주문(ky_orders + ky_orders_history) 동시 업데이트
-   - KY주문 삭제 시 AMT orders/invLogs에 반영 (kyDeleteOrder에서 이미 처리)
+   ★ AMT 발주 ↔ KY 주문 양방향 동기화 (Fix 1)
+   AMT 발주 수정/삭제 시 ky_orders + ky_orders_history 양쪽에 반영
 ═══════════════════════════════════════════════════════ */
 async function syncKyOrderLine(kyOrderId, kyProduct, opts){
   const fb = window._fb;
-  if(!fb || !fb.ready) return;
-  if(!kyOrderId) return;
+  if(!fb || !fb.ready || !kyOrderId) return;
   opts = opts || {};
 
-  // 양쪽 경로 모두에서 주문 검색
+  // ky_orders와 ky_orders_history 양쪽 경로 모두 확인
   const paths = ['ky_orders', 'ky_orders_history'];
   for(const path of paths){
     try{
-      const snap = await fb.get(fb.ref(fb.db, path+'/'+kyOrderId));
+      const snap = await fb.get(fb.ref(fb.db, path + '/' + kyOrderId));
       if(!snap.exists()) continue;
       const order = snap.val();
 
-      // ── 삭제 처리 ──
       if(opts.deleteLine){
-        // items 배열에서 해당 제품만 삭제
-        const remaining = (order.items||[]).filter(it =>
-          (it.relKyProduct||it.product) !== kyProduct &&
-          (opts.relAmtOrder ? it.relAmtOrder !== opts.relAmtOrder : true)
-        );
+        // 삭제: 해당 품목을 items에서 제거
+        const remaining = (order.items||[]).filter(it => {
+          const prod = it.relKyProduct || it.product;
+          if(prod !== kyProduct) return true;
+          if(opts.relAmtOrder && it.relAmtOrder !== opts.relAmtOrder) return true;
+          return false;
+        });
+
         if(remaining.length === 0){
-          // 주문 전체 삭제
-          await fb.set(fb.ref(fb.db, path+'/'+kyOrderId), null);
+          // 전체 삭제
+          await fb.set(fb.ref(fb.db, path + '/' + kyOrderId), null);
           applyLocalKyOrderRemoval(kyOrderId);
         } else {
-          // 일부만 남음: items 갱신 + total 재계산
+          // 일부만 남음 → 총액 재계산
           order.items = remaining;
           order.total = remaining.reduce((s, it) => s + (Number(it.total)||0), 0);
           order.totalQty = remaining.reduce((s, it) => s + (Number(it.qty)||0), 0);
           order.updatedAt = new Date().toISOString();
           if(opts.emptyStatusNote) order.statusNote = (order.statusNote||'') + ' ' + opts.emptyStatusNote;
-          await fb.set(fb.ref(fb.db, path+'/'+kyOrderId), order);
+          await fb.set(fb.ref(fb.db, path + '/' + kyOrderId), order);
           applyLocalKyOrderPatch(order);
         }
         continue;
       }
 
-      // ── 수정 처리: items 배열에서 해당 품목 찾아 업데이트 ──
+      // 수정: 해당 품목 업데이트
       let found = false;
       (order.items||[]).forEach(it => {
-        if((it.relKyProduct||it.product) === kyProduct){
+        const prod = it.relKyProduct || it.product;
+        if(prod === kyProduct){
           found = true;
           if(opts.qty !== undefined) it.qty = opts.qty;
-          if(opts.price !== undefined){
-            it.price = opts.price;
-            it.total = (opts.qty !== undefined ? opts.qty : it.qty) * opts.price;
-          } else if(opts.qty !== undefined){
-            it.total = opts.qty * (Number(it.price)||0);
-          }
+          if(opts.price !== undefined) it.price = opts.price;
+          it.total = (Number(it.qty)||0) * (Number(it.price)||0);
         }
       });
-      if(!found){
-        console.warn(`[양방향] ${path}/${kyOrderId}에서 ${kyProduct} 품목을 찾지 못함`);
-        continue;
-      }
-      // 주문 레벨 업데이트
+      if(!found) continue;
+
       if(opts.orderDate) order.orderDate = opts.orderDate;
       if(opts.memo !== undefined) order.memo = opts.memo;
       order.total = (order.items||[]).reduce((s, it) => s + (Number(it.total)||0), 0);
       order.totalQty = (order.items||[]).reduce((s, it) => s + (Number(it.qty)||0), 0);
       order.updatedAt = new Date().toISOString();
-      order.statusNote = (order.statusNote||'') + ' [AMT발주수정됨]';
-      await fb.set(fb.ref(fb.db, path+'/'+kyOrderId), order);
+      order.statusNote = (order.statusNote||'') + ' [AMT발주수정]';
+      await fb.set(fb.ref(fb.db, path + '/' + kyOrderId), order);
       applyLocalKyOrderPatch(order);
     }catch(e){
-      console.warn(`[양방향] ${path}/${kyOrderId} 동기화 실패:`, e);
+      console.warn(`[syncKyOrderLine] ${path}/${kyOrderId} 실패:`, e);
     }
   }
 }
@@ -6402,18 +6430,17 @@ async function kyDeleteOrder(orderId){
       addAuditLog('delete','KY주문',`삭제: ${target.dealerName} ${fmt(target.total||0)}원 (${target.id})`, target);
     }
 
-    // ★ AMT 측 데이터 삭제 (orders, invLogs)
     invLogs = invLogs.filter(i => !(i.relKyOrder===orderId || (i.relOrder && relatedIds.has(i.relOrder))));
     orders = orders.filter(o=>o.relKyOrder!==orderId);
     saveLS();
     await fbSaveAll();
 
-    // ★ KY 측도 양쪽 경로 모두 삭제 (ky_orders + ky_orders_history)
+    // ★ ky_orders + ky_orders_history 양쪽 모두 삭제
     await fb.set(fb.ref(fb.db,'ky_orders/'+orderId), null);
     await fb.set(fb.ref(fb.db,'ky_orders_history/'+orderId), null);
     await markKyMutation('delete_order', orderId);
     applyLocalKyOrderRemoval(orderId);
-    toast('✅ KY 주문 삭제 완료 (AMT 발주·재고 자동 정리)','info');
+    toast('✅ KY 주문 삭제 완료 (AMT 발주·히스토리 자동 정리)','info');
     kyApplyFilter();
     if(typeof kyRenderHistory === 'function') kyRenderHistory();
     refreshAll();
@@ -6748,12 +6775,22 @@ function calcKyDue(orderDate, term){
   }
   if(term==='3m_19'){
     const d = new Date(y, m-1+3, 19);
-    return kyNextBizDayAMT(kyFmtDateAMT(d)); // ★ 19일이 휴일이면 다음 영업일
+    return kyNextBizDayAMT(kyFmtDateAMT(d)); // ★ Fix 2: 휴일이면 다음 영업일
   }
-  // ★ custom:YYYY-MM-DD 지원
+  // ★ Fix 3: custom:MODE:N 지원
   if(typeof term === 'string' && term.startsWith('custom:')){
-    const customDate = term.slice(7).trim();
-    if(customDate) return kyNextBizDayAMT(customDate);
+    const cp = term.split(':');
+    if(cp.length === 3){
+      const mode = cp[1], day = parseInt(cp[2], 10);
+      if(day >= 1 && day <= 31){
+        let addM = 0;
+        if(mode === 'next') addM = 1;
+        else if(mode === 'plus2') addM = 2;
+        else if(mode === 'plus3') addM = 3;
+        const d = new Date(y, m-1+addM, day);
+        return kyNextBizDayAMT(kyFmtDateAMT(d));
+      }
+    }
   }
   const nm = m===12?1:m+1, ny = m===12?y+1:y;
   return kyNextBizDayAMT(kyEomLocalAMT(ny, nm));
@@ -6860,28 +6897,34 @@ async function saveOneAdminCode(email, name){
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
   const safeEmail = email.replace(/[^a-zA-Z0-9]/g,'_');
   const inputEl = document.getElementById('acode_'+safeEmail);
-  const newCode = (inputEl.value||'').trim();
+  const newCode = (inputEl ? inputEl.value : '').trim();
   if(!newCode){ alert('코드를 입력하세요'); return; }
   if(!/^\d{4,10}$/.test(newCode)){ alert('코드는 숫자 4~10자리여야 합니다'); return; }
 
-  // ★ 해당 행의 저장 버튼을 찾아 비활성화
-  const saveBtn = inputEl.parentElement.parentElement.querySelector('button.btn-primary') ||
-                  inputEl.closest('div[style*="grid"]').querySelector('button.btn-primary');
+  // ★ Fix 5: 저장 버튼 비활성화 + 스피너
+  let saveBtn = null;
+  if(inputEl){
+    const row = inputEl.closest('div');
+    if(row) saveBtn = row.querySelector('button');
+  }
   const origText = saveBtn ? saveBtn.textContent : '';
-  if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = '⏳ 저장중...'; saveBtn.style.opacity = '0.6'; }
+  if(saveBtn){
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ 저장중...';
+    saveBtn.style.opacity = '0.6';
+  }
   toast('💾 저장 중...','info');
 
+  // 본인 코드 변경 여부 확인
   const myEmail = (JSON.parse(sessionStorage.getItem('amt_auth_session')||'{}').email)||'';
   const isMine = email === myEmail;
 
   try{
-    // Firebase Auth 계정 생성 (이미 있으면 skip)
     const helpers = window._firebaseHelpers || {};
     if(helpers.ensureAuthAccount){
       await helpers.ensureAuthAccount(email, newCode, name||email);
     }
 
-    // DB에 저장
     const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
     await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
       email, name:name||email, code:newCode,
@@ -6889,30 +6932,39 @@ async function saveOneAdminCode(email, name){
       updatedAt: new Date().toISOString()
     });
 
-    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = '✅ 저장됨'; saveBtn.style.opacity = '1'; setTimeout(()=>{saveBtn.textContent = origText;}, 1500); }
-    toast('✅ '+(name||email)+' 코드 저장됨 (Auth 동기화)','success');
+    if(saveBtn){
+      saveBtn.disabled = false;
+      saveBtn.textContent = '✅ 저장됨';
+      saveBtn.style.opacity = '1';
+      setTimeout(()=>{ saveBtn.textContent = origText; }, 1500);
+    }
+    toast('✅ '+(name||email)+' 코드 저장됨','success');
     loadAdminCodes();
 
-    // ★ 본인 코드 변경 시: 재로그인 안내 (Firebase Auth 세션은 클라이언트에서 강제 무효화 불가)
+    // ★ 본인 코드 변경 시 재로그인 안내
     if(isMine){
-      setTimeout(() => {
-        if(confirm('⚠️ 본인 코드가 변경되었습니다.\n\n보안상 지금 로그아웃하고 새 코드로 다시 로그인하시겠습니까?\n\n(다른 기기에서도 다음 로그아웃 시 새 코드가 필요합니다)')){
-          amtAdminLogout();
+      setTimeout(()=>{
+        if(confirm('⚠️ 본인 코드가 변경되었습니다.\n\n보안상 지금 로그아웃하고 새 코드로 다시 로그인하시겠습니까?\n\n(취소해도 현재 세션은 유지되지만, 다른 기기에서는 로그아웃 시 새 코드 필요)')){
+          if(typeof amtAdminLogout === 'function') amtAdminLogout();
+          else { sessionStorage.clear(); location.replace('index-AMT.html'); }
         }
-      }, 1000);
+      }, 800);
     }
   }catch(e){
     console.error(e);
-    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = origText; saveBtn.style.opacity = '1'; }
+    if(saveBtn){
+      saveBtn.disabled = false;
+      saveBtn.textContent = origText;
+      saveBtn.style.opacity = '1';
+    }
     if(String(e.message||'').includes('email-already-in-use')){
-      // 이미 Auth 계정 있으면 DB만 업데이트 (비밀번호는 Firebase Console에서)
       const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
       await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
         email, name:name||email, code:newCode,
         role: email==='kyunghoyou@gmail.com'?'super':'admin',
         updatedAt: new Date().toISOString()
       });
-      toast('⚠️ DB 저장됨 (Auth 비밀번호는 Firebase Console에서 수동 변경 필요)','info');
+      toast('⚠️ DB 저장됨 (Auth는 이미 존재 - 총관리자가 Firebase Console에서 비밀번호 재설정 필요)','info');
       loadAdminCodes();
     } else {
       toast('❌ 저장 실패: '+e.message,'error');
@@ -6999,15 +7051,22 @@ async function saveDealerCode(idx, dealerId){
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
   const inputEl = document.getElementById('dcode_'+idx);
-  const newCode = (inputEl.value||'').trim();
+  const newCode = (inputEl ? inputEl.value : '').trim();
   if(!newCode){ alert('코드를 입력하세요'); return; }
   if(!/^\d{6}$/.test(newCode)){ alert('대리점 코드는 6자리 숫자여야 합니다'); return; }
 
-  // ★ 저장 버튼 찾아 비활성화
-  const saveBtn = inputEl.parentElement.querySelector('button.btn-primary') ||
-                  inputEl.closest('div[style*="grid"]').querySelector('button.btn-primary');
+  // ★ Fix 5: 저장 버튼 스피너
+  let saveBtn = null;
+  if(inputEl){
+    const row = inputEl.closest('div');
+    if(row) saveBtn = row.querySelector('button');
+  }
   const origText = saveBtn ? saveBtn.textContent : '';
-  if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = '⏳...'; saveBtn.style.opacity = '0.6'; }
+  if(saveBtn){
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳...';
+    saveBtn.style.opacity = '0.6';
+  }
   toast('💾 저장 중...','info');
 
   try{
@@ -7018,7 +7077,7 @@ async function saveDealerCode(idx, dealerId){
     }
     d.code = newCode;
 
-    // ★ Firebase Auth 자동 동기화 (이메일이 있는 경우)
+    // Firebase Auth 자동 동기화 (이메일이 있는 경우)
     if(d.email){
       const helpers = window._firebaseHelpers || {};
       if(helpers.ensureAuthAccount){
@@ -7032,13 +7091,21 @@ async function saveDealerCode(idx, dealerId){
       }
     }
 
-    // 원격 전체 동기화 (충돌 방지)
     await fbSaveAll();
-    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = '✅'; saveBtn.style.opacity = '1'; setTimeout(()=>{saveBtn.textContent = origText;}, 1500); }
+    if(saveBtn){
+      saveBtn.disabled = false;
+      saveBtn.textContent = '✅';
+      saveBtn.style.opacity = '1';
+      setTimeout(()=>{ saveBtn.textContent = origText; }, 1500);
+    }
     toast('✅ '+d.name+' 코드 → '+newCode+(d.email?' (Auth 동기화)':'')+' 저장됨','success');
     loadDealerCodes();
   }catch(e){
-    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = origText; saveBtn.style.opacity = '1'; }
+    if(saveBtn){
+      saveBtn.disabled = false;
+      saveBtn.textContent = origText;
+      saveBtn.style.opacity = '1';
+    }
     toast('❌ 저장 실패: '+e.message,'error');
   }
 }
@@ -7203,6 +7270,7 @@ async function loadTelegramConfig(){
     SUPER_ADMIN_CHAT_ID = cfg.superAdminChatId || '';
     ADMIN1_BOT_TOKEN    = cfg.admin1Token      || '';
     ADMIN1_CHAT_ID      = cfg.admin1ChatId     || '';
+    console.log('[텔레그램] 설정 로드 완료');
   }catch(e){ console.warn('텔레그램 설정 로드 실패',e); }
 }
 
@@ -7220,7 +7288,7 @@ async function sendTelegram(chatId, text){
     });
     const data = await res.json();
     if(!data.ok) console.warn('[텔레그램] 발송 실패:', data.description);
-    else console.log('[텔레그램] 발송 성공');
+    else console.log('[텔레그램] 발송 완료 → chat_id:', chatId);
   } catch(e){
     console.warn('[텔레그램] 오류:', e.message);
   }
@@ -7799,7 +7867,9 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v11').catch(()=>{});
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260418-v10')
+      .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
+      .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
 }
 </script>
