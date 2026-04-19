@@ -91,7 +91,6 @@
 
 <script type="module">
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const FB_CFG = {
@@ -105,91 +104,155 @@ const FB_CFG = {
 };
 
 const ADMINS      = { 'kyunghoyou@gmail.com':'super', 'amedtech@gmail.com':'admin' };
-const DEVICE_KEY  = 'amt_trusted_device';
 const SESSION_KEY = 'amt_auth_session';
 const SAVED_EMAIL = 'amt_saved_email';
-const SAVED_PW    = 'amt_saved_pw';
+const SAVED_CODE  = 'amt_saved_code';
+const AUTOLOGIN_KEY = 'amt_autologin_ok';
 
 const app  = getApps().find(a=>a.name==='amt-order') || initializeApp(FB_CFG, 'amt-order');
-const auth = getAuth(app);
 const db   = getDatabase(app);
 
-let _pendingEmail='', _pendingOtpCode='', _otpExpiry=0, _timerInterval=null;
+let _pendingEmail='', _pendingCode='', _pendingName='', _pendingRole='', _pendingOtpCode='', _otpExpiry=0, _timerInterval=null;
 
-// ─── 저장된 이메일/비밀번호 자동입력 ──────────────────────
-(function restoreSaved(){
+// ─── 이메일 + 코드 DB 검증 (AMT는 관리자만) ──────────────
+// 주 경로: amt_admins/{key} (이메일+코드) → fallback amt_pw
+async function verifyCredentials(email, code){
+  email = (email||'').toLowerCase().trim();
+  code = (code||'').trim();
+  if(!email || !code) return { ok:false, reason:'empty' };
+  if(!ADMINS[email]) return { ok:false, reason:'not_admin_email' };
+
+  // 1) amt_admins (주 저장소)
+  try{
+    const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+    const snap = await get(ref(db,'amt_admins/'+key));
+    if(snap.exists()){
+      const adm = snap.val();
+      if(String(adm.code||'') === code){
+        return { ok:true, role:adm.role||ADMINS[email], name:adm.name||'', email };
+      }
+      return { ok:false, reason:'code_mismatch' };
+    }
+  }catch(e){ console.warn('amt_admins 조회 실패', e); }
+
+  // 2) fallback: amt_pw
+  try{
+    const snap = await get(ref(db,'amt_pw'));
+    if(!snap.exists()) return { ok:false, reason:'no_codes' };
+    const pwMap = snap.val() || {};
+    const matched = Object.entries(pwMap).find(([name, pw]) => String(pw) === code);
+    if(matched) return { ok:true, role:ADMINS[email], name:matched[0], email };
+    return { ok:false, reason:'code_mismatch' };
+  }catch(e){
+    return { ok:false, reason:'db_error', message:e.message };
+  }
+}
+
+// ─── 저장된 이메일/코드 자동로그인 시도 ───────────────────
+(async function restoreAndAutoLogin(){
   const em = localStorage.getItem(SAVED_EMAIL)||'';
   if(em) document.getElementById('email').value = em;
-})();
 
-// ─── Auth 상태 감지 ────────────────────────────────────────
-onAuthStateChanged(auth, async (user) => {
-  if(!user) return;
-  const role = ADMINS[user.email];
-  if(!role){ auth.signOut(); return; }
+  const savedCode = localStorage.getItem(SAVED_CODE)||'';
+  const autoOk = localStorage.getItem(AUTOLOGIN_KEY) === '1';
+  if(!em || !savedCode || !autoOk) return;
 
-  // 신뢰된 기기면 바로 이동
-  if(localStorage.getItem(DEVICE_KEY) === user.uid){
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({email:user.email, role, uid:user.uid}));
-    location.replace('orders-admin-AMT.html');
+  showMsg('loginMsg','🔐 자동 로그인 확인 중...','');
+  const res = await verifyCredentials(em, savedCode);
+  if(!res.ok){
+    // 코드가 서버와 다름 → 자동로그인 해제 + 사용자 입력 유도
+    localStorage.removeItem(SAVED_CODE);
+    localStorage.removeItem(AUTOLOGIN_KEY);
+    showMsg('loginMsg','⚠️ 코드번호가 변경됐습니다. 새 코드를 입력하세요','error');
+    document.getElementById('pw').value = '';
+    document.getElementById('pw').focus();
     return;
   }
-  // 새 기기 → 이메일(or 텔레그램) OTP
-  await sendOtp(user.email);
-});
+  const sess = { email:em, role:res.role, name:res.name||'' };
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+  showMsg('loginMsg','✅ 자동 로그인 완료! 이동 중...','success');
+  setTimeout(()=>location.replace('orders-admin-AMT.html'), 300);
+})();
 
 // ─── 로그인 ────────────────────────────────────────────────
 window.doLogin = async () => {
   const email = document.getElementById('email').value.trim();
   const pw    = document.getElementById('pw').value.trim();
   if(!email||!pw){ showMsg('loginMsg','이메일과 코드번호를 입력하세요','error'); return; }
-  if(!ADMINS[email]){ showMsg('loginMsg','등록된 관리자 이메일이 아닙니다','error'); return; }
+  if(!ADMINS[email.toLowerCase()]){ showMsg('loginMsg','등록된 관리자 이메일이 아닙니다','error'); return; }
 
-  // ★ 로딩 시작 - 버튼 비활성화 + 스피너
   const btn = document.getElementById('loginBtn');
   btn.classList.add('loading');
   btn.disabled = true;
   showMsg('loginMsg','🔐 인증 중...','');
 
-  try {
-    await signInWithEmailAndPassword(auth, email, pw);
-    showMsg('loginMsg','✅ 인증 성공! 이동 중...','success');
-    // onAuthStateChanged에서 이어서 처리됨 (스피너는 유지해서 화면 이동 전까지 깜박임 방지)
-  } catch(e){
+  const res = await verifyCredentials(email, pw);
+  if(!res.ok){
     btn.classList.remove('loading');
     btn.disabled = false;
-    const c=e.code||'';
-    if(c.includes('wrong-password')||c.includes('invalid-credential')) showMsg('loginMsg','❌ 코드번호가 틀립니다','error');
-    else if(c.includes('user-not-found')) showMsg('loginMsg','❌ 등록되지 않은 이메일입니다','error');
-    else if(c.includes('too-many-requests')) showMsg('loginMsg','⏳ 잠시 후 다시 시도하세요','error');
-    else showMsg('loginMsg','❌ 로그인 실패: '+e.message,'error');
+    let msg = '❌ 코드번호가 틀립니다';
+    if(res.reason==='db_error') msg = '❌ 서버 오류: '+(res.message||'');
+    if(res.reason==='no_codes') msg = '❌ 관리자 코드 미설정';
+    showMsg('loginMsg', msg, 'error');
+    return;
   }
+
+  _pendingEmail = email.toLowerCase();
+  _pendingCode = pw;
+  _pendingName = res.name;
+  _pendingRole = res.role;
+
+  // 이 기기에서 과거 OTP 통과한 이력 있으면 바로 통과
+  const deviceOk = localStorage.getItem('amt_device_verified_'+btoa(_pendingEmail).replace(/=/g,'')) === '1';
+  if(deviceOk){
+    await finalizeLogin(false);
+    return;
+  }
+  await sendOtp(_pendingEmail);
 };
+
+async function finalizeLogin(fromOtp){
+  const sess = { email:_pendingEmail, role:_pendingRole, name:_pendingName };
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+
+  const remember = document.getElementById('rememberMe').checked;
+  if(remember){
+    localStorage.setItem(SAVED_EMAIL, _pendingEmail);
+    localStorage.setItem(SAVED_CODE, _pendingCode);
+    localStorage.setItem(AUTOLOGIN_KEY, '1');
+    if(fromOtp){
+      localStorage.setItem('amt_device_verified_'+btoa(_pendingEmail).replace(/=/g,''), '1');
+    }
+  } else {
+    localStorage.removeItem(SAVED_CODE);
+    localStorage.removeItem(AUTOLOGIN_KEY);
+  }
+
+  const msgId = fromOtp ? 'verifyMsg' : 'loginMsg';
+  showMsg(msgId,'✅ 인증 완료! 이동 중...','success');
+  setTimeout(()=>location.replace('orders-admin-AMT.html'), 500);
+}
 
 // ─── OTP 생성 및 발송 ──────────────────────────────────────
 async function sendOtp(email){
-  // ★ 화면 즉시 전환 - 사용자에게 진행감 제공
   document.getElementById('loginBox').style.display  = 'none';
   document.getElementById('verifyBox').style.display = 'block';
   document.getElementById('otpInput').value = '';
   document.getElementById('verifyDesc').textContent = '📤 인증코드 발송 중...';
 
   const code = String(Math.floor(100000+Math.random()*900000));
-  _pendingEmail   = email;
   _pendingOtpCode = code;
   _otpExpiry      = Date.now() + 5*60*1000;
 
-  // DB에 저장
   try{
     await set(ref(db,'amt_otp/'+btoa(email).replace(/=/g,'')), {code, expiry:_otpExpiry, email});
   }catch(e){ console.warn('OTP 저장 실패',e); }
 
-  // 이메일로 OTP 발송 (EmailJS)
   let sent = false;
   try{
     const snap = await get(ref(db,'config/emailjs'));
     if(snap.exists()){
-      const cfg = snap.val(); // { serviceId, templateId, publicKey }
+      const cfg = snap.val();
       if(cfg.serviceId && cfg.templateId){
         if(cfg.publicKey) emailjs.init(cfg.publicKey);
         const res = await emailjs.send(cfg.serviceId, cfg.templateId, {
@@ -235,19 +298,8 @@ window.verifyOtp = async () => {
   }
 
   clearInterval(_timerInterval);
-  const user = auth.currentUser;
-
-  // 기기 신뢰 + 자동완성 저장
-  if(document.getElementById('rememberMe').checked){
-    localStorage.setItem(DEVICE_KEY, user.uid);
-    localStorage.setItem(SAVED_EMAIL, _pendingEmail);
-  }
   set(ref(db,'amt_otp/'+btoa(_pendingEmail).replace(/=/g,'')),null).catch(()=>{});
-
-  const role = ADMINS[_pendingEmail]||'admin';
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify({email:_pendingEmail, role, uid:user?.uid||''}));
-  showMsg('verifyMsg','✅ 인증 완료!','success');
-  setTimeout(()=>location.replace('orders-admin-AMT.html'), 700);
+  await finalizeLogin(true);
 };
 
 window.resendOtp = async ()=>{ if(_pendingEmail) await sendOtp(_pendingEmail); };
@@ -256,7 +308,8 @@ window.backToLogin = ()=>{
   document.getElementById('loginBox').style.display  = 'block';
   document.getElementById('verifyBox').style.display = 'none';
   document.getElementById('otpInput').value = '';
-  auth.signOut();
+  const loginBtn = document.getElementById('loginBtn');
+  if(loginBtn){ loginBtn.classList.remove('loading'); loginBtn.disabled = false; }
 };
 
 function startOtpTimer(){

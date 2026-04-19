@@ -2704,23 +2704,26 @@ async function _doDelOrder(id){
   const relKyId = o.relKyOrder || ('ky_from_amt_' + id);
   const relKyProduct = o.relKyProduct || o.product || null;
 
+  invLogs.forEach(i => { if(i.relOrder === id) _trackDelete('invLogs', i.id); });
   invLogs = invLogs.filter(i => i.relOrder !== id);
+  _trackDelete('orders', id);
   orders = orders.filter(x => x.id !== id);
   saveLS();
   await fbSaveAll();
 
+  let kySyncOk = false;
   if(relKyId && relKyProduct){
     try{
-      // ★ syncKyOrderLine이 ky_orders + ky_orders_history 양쪽 자동 처리
-      await syncKyOrderLine(relKyId, relKyProduct, {
+      const res = await syncKyOrderLine(relKyId, relKyProduct, {
         deleteLine: true,
         relAmtOrder: id,
         emptyStatusNote: '[AMT발주삭제]'
       });
+      kySyncOk = res && res.found;
     }catch(e){ console.warn('KY주문 연동삭제 실패', e); }
   }
 
-  toast('발주 삭제 완료 (KY주문 자동 반영됨)','info');
+  toast(kySyncOk ? '발주 삭제 완료 (KY 히스토리 자동 반영됨)' : '발주 삭제 완료 (KY 연동 없음)','info');
   refreshAll();
 }
 
@@ -2812,22 +2815,24 @@ async function saveOrderEdit(){
     // ★ relKyOrder가 없으면 'ky_from_amt_' + order.id 패턴으로 추론
     const kyOrderId = o.relKyOrder || ('ky_from_amt_' + _editOrderId);
     const kyProduct = o.relKyProduct || o.product;
+    let kySyncOk = false;
     if(kyOrderId){
       try{
         // ★ syncKyOrderLine이 양쪽 경로 자동 처리
         if(!o.relKyOrder){ o.relKyOrder = kyOrderId; }
-        await syncKyOrderLine(kyOrderId, kyProduct, {
+        const res = await syncKyOrderLine(kyOrderId, kyProduct, {
           qty: newQty,
           price: newPrice,
           orderDate: newDate,
           memo: newMemo,
           relAmtOrder: o.id
         });
+        kySyncOk = res && res.found;
       }catch(e){ console.warn('KY주문 수정 연동 실패:', e); }
     }
 
     closeOrderEdit();
-    toast('발주 수정 완료! (재고·KY주문 자동 업데이트됨)','success');
+    toast(kySyncOk ? '발주 수정 완료! (재고·KY 히스토리 자동 업데이트됨)' : '발주 수정 완료! (KY 연동 없음)','success');
     refreshAll();
   });
 }
@@ -3306,7 +3311,9 @@ async function deleteInternal(id){
   if(!confirm('이 내부거래를 삭제할까요? (관련 재고이력도 함께 삭제됩니다)')) return;
   const t=internalTrades.find(x=>x.id===id);
   if(t) addAuditLog('delete','내부거래',`삭제: ${t.product} ${fmt(t.qty)}개 ${fmt(t.total)}원 (${t.date})`,t);
+  _trackDelete('internalTrades', id);
   internalTrades=internalTrades.filter(t=>t.id!==id);
+  invLogs.forEach(i => { if(i.relInternal === id) _trackDelete('invLogs', i.id); });
   invLogs=invLogs.filter(i=>i.relInternal!==id);
   saveLS();
   await fbDelDoc('internal',id);
@@ -3493,6 +3500,7 @@ async function deleteAdjEntry(id){
 
   await requireOtp(`채무조정 삭제 (${txTypeLabel(t.type)} ${fmt(Math.abs(t.adjAmt||0))}원)`, async () => {
     addAuditLog('delete','채권채무',`채무조정 삭제: ${txTypeLabel(t.type)} ${fmt(t.adjAmt||0)}원 (${t.date})`, t);
+    _trackDelete('txLogs', id);
     txLogs = txLogs.filter(x => x.id !== id);
     saveLS(); await fbSaveAll();
     toast('채무조정 삭제 완료','info');
@@ -3808,11 +3816,14 @@ async function _doDeleteTx(id){
   const t=txLogs.find(x=>x.id===id);
   if(!t) return;
   addAuditLog('delete','채권채무',`삭제: ${txTypeLabel(t.type)} ${fmt(t.amount||0)}원 (${t.date})`,t);
+  _trackDelete('txLogs', id);
   txLogs=txLogs.filter(x=>x.id!==id);
   // AMT_to_KY: relInternal로 연결된 재고이력·내부거래도 함께 삭제
   if(t.type==='AMT_to_KY' && t.relInternal){
     const itId=t.relInternal;
+    invLogs.forEach(i => { if(i.relInternal === itId) _trackDelete('invLogs', i.id); });
     invLogs=invLogs.filter(i=>i.relInternal!==itId);
+    _trackDelete('internalTrades', itId);
     internalTrades=internalTrades.filter(x=>x.id!==itId);
     await fbDelDoc('internal', itId);
   }
@@ -3923,6 +3934,7 @@ async function _doSaveTxEdit(editId){
 
     const oldProduct=it.product, oldQty=it.qty, oldDate=it.date;
 
+    invLogs.forEach(i => { if(i.relInternal === itId) _trackDelete('invLogs', i.id); });
     invLogs = invLogs.filter(i=>i.relInternal!==itId);
     const ts=new Date().toISOString();
     invLogs.push({id:'inv_'+Date.now()+'_a', date:newDate, product:newProduct, qty:-newQty, type:'out',
@@ -4121,7 +4133,10 @@ async function deleteBestReturn(id){
     const ftLabel={'KY_to_AMT':'KY→AMT','AMT_to_BEST':'AMT→BEST','KY_to_BEST':'KY→BEST'};
     addAuditLog('delete','채권채무',`반품삭제: ${ftLabel[ft]||ft} ${r.product} ${fmt(r.qty)}개 ${fmt(r.total)}원`,r);
   }
-  bestReturns=bestReturns.filter(x=>x.id!==id);
+  bestReturns=bestReturns.filter(x=>{
+    if(x.id===id){ _trackDelete('bestReturns', x.id); return false; }
+    return true;
+  });
   // ※ 반품제품은 재고에 반영하지 않으므로 invLogs 정리 불필요
   saveLS(); await fbSaveAll();
   toast('삭제 완료','info');
@@ -4429,23 +4444,17 @@ async function _doSaveDealer(){
     const finalCode = code || d.code || '';
     Object.assign(d,{name,email,code:finalCode,term,fee,note,products:prods});
     await fbSaveDoc('dealers',d.id,d);
-    // Firebase Auth 계정 업데이트 (코드 변경 시)
+    // ★ Firebase Auth 로직 제거됨 - 코드는 DB(dealers[].code)로만 검증
+    // 대리점이 다음 로그인할 때 index-KY.html이 DB의 code와 비교하므로 즉시 반영됨
     if(code && code !== d.code){
-      await ensureDealerAuthAccount(email, code).catch(e => {
-        console.warn('Auth 계정 업데이트 실패', e);
-        toast('⚠️ Auth 계정 갱신 실패 - 수동 확인 필요','error');
-      });
+      toast('✅ 코드 변경됨 - 다음 로그인부터 새 코드 적용','info');
     }
   } else {
     const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods};
     dealers.push(d);
     addAuditLog('create','대리점',`추가: ${name} (이메일: ${email})`);
     await fbSaveDoc('dealers',d.id,d);
-    // Firebase Auth 계정 생성
-    await ensureDealerAuthAccount(email, code).catch(e => {
-      console.warn('Auth 계정 생성 실패', e);
-      toast('⚠️ Auth 계정 생성 실패: '+e.message+' (이메일이 이미 등록되었을 수 있음)','error');
-    });
+    toast('✅ 신규 대리점 등록 - 즉시 로그인 가능','success');
   }
 
   saveLS();
@@ -4478,6 +4487,7 @@ async function _doDeleteDealer(id){
   }
   const dd=dealers.find(d=>d.id===id);
   if(dd) addAuditLog('delete','대리점',`삭제: ${dd.name}`,dd);
+  _trackDelete('dealers', id);
   dealers=dealers.filter(d=>d.id!==id);
   saveLS();
   await fbDelDoc('dealers',id);
@@ -4902,67 +4912,186 @@ function migrateDueDates(){
   }
 }
 
+/* ═══════════════════════════════════════════════════════
+   ★★★ 동시성 안전 저장 (v11) ★★★
+   여러 관리자가 동시에 같은 데이터를 수정해도 안전하도록:
+   1) 삭제 추적 - 내가 삭제한 ID를 기억해서 merge 때 되살아나지 않게
+   2) 읽기→병합→쓰기를 순차 처리 (최신 remote 기준으로 내 변경만 적용)
+   3) orders/invLogs/dealers/products 등은 ID 기준 개별 항목 단위로 merge
+═══════════════════════════════════════════════════════ */
+
+// 삭제 추적 - sessionStorage에만 보관 (세션 종료 시 자동 초기화)
+function _trackDelete(kind, id){
+  if(!id) return;
+  try{
+    const key = 'amt_deleted_'+kind;
+    const list = JSON.parse(sessionStorage.getItem(key)||'[]');
+    if(!list.includes(id)){ list.push(id); sessionStorage.setItem(key, JSON.stringify(list)); }
+  }catch(e){}
+}
+function _getDeleted(kind){
+  try{ return new Set(JSON.parse(sessionStorage.getItem('amt_deleted_'+kind)||'[]')); }
+  catch(e){ return new Set(); }
+}
+function _clearDeleted(kind){
+  try{ sessionStorage.removeItem('amt_deleted_'+kind); }catch(e){}
+}
+window._trackDelete = _trackDelete;
+
+// 저장 잠금 - 같은 브라우저에서 동시 fbSaveAll 호출 방지
+let _saveInProgress = false;
+let _saveQueue = false;
+
 async function fbSaveAll(){
   const fb=window._fb; if(!fb||!fb.ready) return;
-  const now=new Date().toISOString();
 
-  // ★ [질문 11 해결] 저장 전 원격 최신 타임스탬프 확인
-  // 만약 원격이 로컬보다 최신이면 → 원격 데이터 먼저 반영 후 병합 저장 (과거 데이터가 최신을 덮어쓰는 문제 방지)
+  // 이미 저장 중이면 큐에 적어두고 종료 (저장 완료 후 한 번 더 실행됨)
+  if(_saveInProgress){ _saveQueue = true; return; }
+  _saveInProgress = true;
+
   try{
-    const remoteSnap = await fb.get(fb.ref(fb.db,'amt_data/_updatedAt'));
-    const remoteTime = remoteSnap.exists() ? remoteSnap.val() : '';
-    const localTime = localStorage.getItem('amt_updatedAt') || '';
-    if(remoteTime && localTime && remoteTime > localTime){
-      // 서버가 더 최신 - 서버 데이터 먼저 가져와서 병합
-      console.warn('[동기화] 서버가 더 최신입니다. 병합 저장 시도... 원격:', remoteTime, '로컬:', localTime);
+    const now=new Date().toISOString();
+
+    // ① 최신 remote 가져오기
+    let remote = null;
+    try{
       const fullSnap = await fb.get(fb.ref(fb.db,'amt_data'));
-      if(fullSnap.exists()){
-        const remote = fullSnap.val();
-        // 로컬의 최근 변경사항을 원격 기준으로 병합
+      if(fullSnap.exists()) remote = fullSnap.val();
+    }catch(e){ console.warn('[동기화] 원격 읽기 실패, 로컬로 저장 진행:', e); }
+
+    // ② 원격이 더 최신이면 병합 - 하지만 내가 삭제한 ID는 제외
+    if(remote && remote._updatedAt){
+      const localTime = localStorage.getItem('amt_updatedAt') || '';
+      if(!localTime || remote._updatedAt > localTime){
+        console.log('[동기화] 원격이 더 최신 - 안전 병합 중...', {remote: remote._updatedAt, local: localTime});
         _mergeRemoteIntoLocal(remote);
+      } else {
+        // 내가 더 최신이지만, 내가 건드리지 않은 섹션은 원격에서 받아와야 함
+        // (A가 dealers만 수정한 동안 B가 orders만 수정한 경우 등)
+        _mergeRemoteForUntouched(remote);
       }
     }
-  }catch(e){ console.warn('[동기화] 원격 확인 실패, 그대로 저장 진행:', e); }
 
-  const payload={ orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs, bestReturns, kyReturns, importPrices:(typeof importPrices!=='undefined'?importPrices:{}), _updatedAt:now };
-  try{
-    await fb.set(fb.ref(fb.db,'amt_data'), payload);
-    localStorage.setItem('amt_updatedAt', now); // ★ 저장 후 로컬 타임스탬프 갱신
-    setLastSync(now);
-  }catch(e){ console.warn('FB save err',e); }
+    // ③ 저장
+    const payload={
+      orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs,
+      bestReturns, kyReturns,
+      importPrices:(typeof importPrices!=='undefined'?importPrices:{}),
+      _updatedAt:now
+    };
+    try{
+      await fb.set(fb.ref(fb.db,'amt_data'), payload);
+      localStorage.setItem('amt_updatedAt', now);
+      setLastSync(now);
+
+      // ④ 저장 성공 후 삭제 추적 정리 (이미 서버에 반영됨)
+      _clearDeleted('orders');
+      _clearDeleted('invLogs');
+      _clearDeleted('dealers');
+      _clearDeleted('internalTrades');
+      _clearDeleted('txLogs');
+      _clearDeleted('bestReturns');
+    }catch(e){ console.warn('FB save err',e); }
+  } finally {
+    _saveInProgress = false;
+    // 저장 중 또 다른 변경이 있었으면 한 번 더 실행
+    if(_saveQueue){ _saveQueue = false; setTimeout(()=>fbSaveAll(), 50); }
+  }
 }
 
-// ★ [질문 11] 서버 데이터를 로컬에 병합 (로컬 신규 데이터는 유지, 서버에만 있는 것은 추가)
+// ★ 서버가 더 최신일 때: 안전 병합 (내 변경은 유지, 서버 변경은 흡수)
 function _mergeRemoteIntoLocal(remote){
-  // orders: id 기준으로 병합 (로컬에 이미 있는 것은 로컬 유지)
+  const delOrders = _getDeleted('orders');
+  const delInv = _getDeleted('invLogs');
+  const delDealers = _getDeleted('dealers');
+  const delInternal = _getDeleted('internalTrades');
+  const delTx = _getDeleted('txLogs');
+
+  // orders: ID 기준 병합 - 로컬에 있는 건 내가 최근 수정한 것일 수도 있으니 유지,
+  //         서버에만 있는 건 추가 (단, 내가 삭제한 것은 제외)
   if(remote.orders && Array.isArray(remote.orders)){
     const localIds = new Set(orders.map(o=>o.id));
     remote.orders.forEach(ro => {
+      if(!ro || !ro.id) return;
+      if(delOrders.has(ro.id)) return;  // ★ 내가 삭제한 건 다시 살리지 않음
       if(!localIds.has(ro.id)) orders.push(ro);
     });
   }
   if(remote.invLogs && Array.isArray(remote.invLogs)){
     const localIds = new Set(invLogs.map(i=>i.id));
     remote.invLogs.forEach(ri => {
+      if(!ri || !ri.id) return;
+      if(delInv.has(ri.id)) return;
       if(!localIds.has(ri.id)){ if(!ri.company) ri.company='AMT'; invLogs.push(ri); }
     });
   }
-  // dealers, products: 배열이지만 관리자 수정이므로 원격 기준
-  if(remote.dealers) dealers = remote.dealers;
-  if(remote.products) products = remote.products;
+
+  // dealers: 개별 병합 (관리자 수정이지만 여러 명이 동시 수정 가능)
+  if(remote.dealers && Array.isArray(remote.dealers)){
+    const localMap = new Map(dealers.map(d => [d.id, d]));
+    remote.dealers.forEach(rd => {
+      if(!rd || !rd.id) return;
+      if(delDealers.has(rd.id)) return;
+      if(!localMap.has(rd.id)) dealers.push(rd);
+      // 로컬에 이미 있으면 내 버전이 최신이라고 가정해서 유지
+    });
+  }
+
+  // products: 배열의 합집합 (단순 문자열 배열)
+  if(remote.products && Array.isArray(remote.products)){
+    const localSet = new Set(products);
+    remote.products.forEach(p => { if(!localSet.has(p)) products.push(p); });
+  }
+
   if(remote.internalTrades && Array.isArray(remote.internalTrades)){
     const localIds = new Set(internalTrades.map(t=>t.id));
-    remote.internalTrades.forEach(r => { if(!localIds.has(r.id)) internalTrades.push(r); });
+    remote.internalTrades.forEach(r => {
+      if(!r || !r.id) return;
+      if(delInternal.has(r.id)) return;
+      if(!localIds.has(r.id)) internalTrades.push(r);
+    });
   }
   if(remote.auditLogs && Array.isArray(remote.auditLogs)){
+    // 감사 로그는 append-only - 서버에 있는 거 모두 흡수
     const localIds = new Set(auditLogs.map(l=>l.id));
-    remote.auditLogs.forEach(r => { if(!localIds.has(r.id)) auditLogs.push(r); });
+    remote.auditLogs.forEach(r => { if(r && r.id && !localIds.has(r.id)) auditLogs.push(r); });
   }
   if(remote.txLogs && Array.isArray(remote.txLogs)){
     const localIds = new Set(txLogs.map(l=>l.id));
-    remote.txLogs.forEach(r => { if(!localIds.has(r.id)) txLogs.push(r); });
+    remote.txLogs.forEach(r => {
+      if(!r || !r.id) return;
+      if(delTx.has(r.id)) return;
+      if(!localIds.has(r.id)) txLogs.push(r);
+    });
+  }
+  if(remote.bestReturns && Array.isArray(remote.bestReturns)){
+    const delBest = _getDeleted('bestReturns');
+    const localIds = new Set(bestReturns.map(b=>b.id));
+    remote.bestReturns.forEach(r => {
+      if(!r || !r.id) return;
+      if(delBest.has(r.id)) return;
+      if(!localIds.has(r.id)) bestReturns.push(r);
+    });
+  }
+  if(remote.kyReturns && Array.isArray(remote.kyReturns)){
+    const localIds = new Set(kyReturns.map(k=>k.id));
+    remote.kyReturns.forEach(r => { if(r && r.id && !localIds.has(r.id)) kyReturns.push(r); });
+  }
+  if(remote.importPrices && typeof importPrices !== 'undefined'){
+    importPrices = Object.assign({}, remote.importPrices, importPrices);
   }
   saveLS();
+}
+
+// ★ 내가 더 최신일 때도 내가 건드리지 않은 섹션은 원격 값 흡수
+// (예: 내가 orders만 수정 중인 동안 다른 사용자가 dealers 수정한 경우)
+function _mergeRemoteForUntouched(remote){
+  // audit log는 항상 append-only이므로 원격에 있는 것은 모두 흡수
+  if(remote.auditLogs && Array.isArray(remote.auditLogs)){
+    const localIds = new Set(auditLogs.map(l=>l.id));
+    remote.auditLogs.forEach(r => { if(r && r.id && !localIds.has(r.id)) auditLogs.push(r); });
+  }
+  // 다른 것들은 로컬이 이미 최신이라고 신뢰
 }
 
 // 개별 호출 래퍼 (기존 코드 호환 유지 - 실제로는 전체 저장)
@@ -5048,12 +5177,17 @@ function fbStartListener(){
   _fbListener = fb.onValue(fb.ref(fb.db,'amt_data'), (snap)=>{
     if(firstCall){ firstCall=false; return; } // 최초 호출(현재값)은 fbSync에서 처리
     if(!snap.exists()) return;
+    // ★ 내가 저장 중이면 원격 수신을 스킵 (저장 완료 후 다음 리스너 이벤트에서 처리)
+    if(_saveInProgress){ return; }
     const remote=snap.val();
     const remoteTime=remote._updatedAt||'';
     const localTime=localStorage.getItem('amt_updatedAt')||'';
     if(remoteTime > localTime){
-      // 다른 기기에서 변경됨
-      _applyRemote(remote);
+      // ★ 다른 기기에서 변경됨 - 안전 병합 사용 (덮어쓰기 X)
+      _mergeRemoteIntoLocal(remote);
+      // auditLogs는 append-only이므로 원격 타임스탬프로 업데이트
+      localStorage.setItem('amt_updatedAt', remoteTime);
+      setLastSync(remoteTime);
       refreshAll();
       toast('📱 다른 기기에서 데이터가 업데이트되었습니다','info');
     }
@@ -6299,38 +6433,54 @@ function applyLocalKyOrderRemoval(orderId){
    ★ AMT 발주 ↔ KY 주문 양방향 동기화 (Fix 1)
    AMT 발주 수정/삭제 시 ky_orders + ky_orders_history 양쪽에 반영
 ═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════
+   ★ AMT 발주 ↔ KY 주문 양방향 동기화 (Fix 1,2)
+   AMT 발주 수정/삭제 시 ky_orders + ky_orders_history 양쪽에 반영
+   - 히스토리에 있는 주문(AMT 직접 발주)은 items의 product/relAmtOrder로 매칭
+   - 수정/삭제 후 kyRenderHistory() 호출해 UI 즉시 갱신
+═══════════════════════════════════════════════════════ */
 async function syncKyOrderLine(kyOrderId, kyProduct, opts){
   const fb = window._fb;
-  if(!fb || !fb.ready || !kyOrderId) return;
+  if(!fb || !fb.ready || !kyOrderId) return { ok:false, found:false };
   opts = opts || {};
 
-  // ky_orders와 ky_orders_history 양쪽 경로 모두 확인
+  let touched = false;
   const paths = ['ky_orders', 'ky_orders_history'];
+  const nowIso = new Date().toISOString();
+
   for(const path of paths){
     try{
       const snap = await fb.get(fb.ref(fb.db, path + '/' + kyOrderId));
       if(!snap.exists()) continue;
       const order = snap.val();
+      const items = order.items || [];
 
       if(opts.deleteLine){
         // 삭제: 해당 품목을 items에서 제거
-        const remaining = (order.items||[]).filter(it => {
-          const prod = it.relKyProduct || it.product;
-          if(prod !== kyProduct) return true;
-          if(opts.relAmtOrder && it.relAmtOrder !== opts.relAmtOrder) return true;
-          return false;
+        // ★ 매칭 우선순위: relAmtOrder > relKyProduct > product (이름 공백/케이스 무시)
+        const normalize = (s) => String(s||'').trim().toUpperCase().replace(/\s/g,'');
+        const targetProd = normalize(kyProduct);
+        const remaining = items.filter(it => {
+          if(opts.relAmtOrder && it.relAmtOrder === opts.relAmtOrder) return false;
+          const prod = normalize(it.relKyProduct || it.product);
+          if(prod !== targetProd) return true;
+          // relAmtOrder가 설정되어 있는데 값이 다르면 keep (다른 발주의 같은 제품)
+          if(opts.relAmtOrder && it.relAmtOrder && it.relAmtOrder !== opts.relAmtOrder) return true;
+          return false;  // 제거
         });
+
+        if(remaining.length === items.length) continue; // 매칭 실패 → 다음 path 시도
+        touched = true;
 
         if(remaining.length === 0){
           // 전체 삭제
           await fb.set(fb.ref(fb.db, path + '/' + kyOrderId), null);
           applyLocalKyOrderRemoval(kyOrderId);
         } else {
-          // 일부만 남음 → 총액 재계산
           order.items = remaining;
           order.total = remaining.reduce((s, it) => s + (Number(it.total)||0), 0);
           order.totalQty = remaining.reduce((s, it) => s + (Number(it.qty)||0), 0);
-          order.updatedAt = new Date().toISOString();
+          order.updatedAt = nowIso;
           if(opts.emptyStatusNote) order.statusNote = (order.statusNote||'') + ' ' + opts.emptyStatusNote;
           await fb.set(fb.ref(fb.db, path + '/' + kyOrderId), order);
           applyLocalKyOrderPatch(order);
@@ -6339,10 +6489,13 @@ async function syncKyOrderLine(kyOrderId, kyProduct, opts){
       }
 
       // 수정: 해당 품목 업데이트
+      const normalize = (s) => String(s||'').trim().toUpperCase().replace(/\s/g,'');
+      const targetProd = normalize(kyProduct);
       let found = false;
-      (order.items||[]).forEach(it => {
-        const prod = it.relKyProduct || it.product;
-        if(prod === kyProduct){
+      items.forEach(it => {
+        const prod = normalize(it.relKyProduct || it.product);
+        const amtMatch = !opts.relAmtOrder || !it.relAmtOrder || it.relAmtOrder === opts.relAmtOrder;
+        if(prod === targetProd && amtMatch){
           found = true;
           if(opts.qty !== undefined) it.qty = opts.qty;
           if(opts.price !== undefined) it.price = opts.price;
@@ -6350,12 +6503,13 @@ async function syncKyOrderLine(kyOrderId, kyProduct, opts){
         }
       });
       if(!found) continue;
+      touched = true;
 
       if(opts.orderDate) order.orderDate = opts.orderDate;
       if(opts.memo !== undefined) order.memo = opts.memo;
-      order.total = (order.items||[]).reduce((s, it) => s + (Number(it.total)||0), 0);
-      order.totalQty = (order.items||[]).reduce((s, it) => s + (Number(it.qty)||0), 0);
-      order.updatedAt = new Date().toISOString();
+      order.total = items.reduce((s, it) => s + (Number(it.total)||0), 0);
+      order.totalQty = items.reduce((s, it) => s + (Number(it.qty)||0), 0);
+      order.updatedAt = nowIso;
       order.statusNote = (order.statusNote||'') + ' [AMT발주수정]';
       await fb.set(fb.ref(fb.db, path + '/' + kyOrderId), order);
       applyLocalKyOrderPatch(order);
@@ -6363,6 +6517,25 @@ async function syncKyOrderLine(kyOrderId, kyProduct, opts){
       console.warn(`[syncKyOrderLine] ${path}/${kyOrderId} 실패:`, e);
     }
   }
+
+  // ★ ky_orders_history 탭이 열려있으면 즉시 UI 재렌더링
+  try{
+    const histTab = document.getElementById('kyHistList');
+    if(histTab && touched && typeof kyRenderHistory === 'function'){
+      kyRenderHistory();
+    }
+  }catch(e){}
+
+  // 변경사항 있으면 mutation signal 보내서 KY admin의 실시간 리스너도 트리거
+  if(touched){
+    try{
+      await markKyMutation(opts.deleteLine ? 'amt_sync_delete' : 'amt_sync_edit', kyOrderId, {
+        relAmtOrder: opts.relAmtOrder || ''
+      });
+    }catch(e){}
+  }
+
+  return { ok:true, found:touched };
 }
 
 const kyStatusMap = {
@@ -6430,6 +6603,10 @@ async function kyDeleteOrder(orderId){
       addAuditLog('delete','KY주문',`삭제: ${target.dealerName} ${fmt(target.total||0)}원 (${target.id})`, target);
     }
 
+    invLogs.forEach(i => {
+      if(i.relKyOrder===orderId || (i.relOrder && relatedIds.has(i.relOrder))) _trackDelete('invLogs', i.id);
+    });
+    orders.forEach(o => { if(o.relKyOrder===orderId) _trackDelete('orders', o.id); });
     invLogs = invLogs.filter(i => !(i.relKyOrder===orderId || (i.relOrder && relatedIds.has(i.relOrder))));
     orders = orders.filter(o=>o.relKyOrder!==orderId);
     saveLS();
@@ -6920,17 +7097,20 @@ async function saveOneAdminCode(email, name){
   const isMine = email === myEmail;
 
   try{
-    const helpers = window._firebaseHelpers || {};
-    if(helpers.ensureAuthAccount){
-      await helpers.ensureAuthAccount(email, newCode, name||email);
-    }
-
+    // ★ Firebase Auth 로직 제거 - DB만으로 관리
     const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+    const adminName = name || email;
+    const role = email==='kyunghoyou@gmail.com'?'super':'admin';
+
+    // ① amt_admins (주 저장소 - 이메일 기반 풍부한 정보)
     await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
-      email, name:name||email, code:newCode,
-      role: email==='kyunghoyou@gmail.com'?'super':'admin',
+      email, name:adminName, code:newCode, role,
       updatedAt: new Date().toISOString()
     });
+
+    // ② amt_pw (KY admin 로그인 호환용 - {이름: 코드} 맵)
+    // ★ 이름이 바뀐 경우 옛날 키 삭제는 renderAdminCodeList에서 동기화로 처리
+    await fb.set(fb.ref(fb.db,'amt_pw/'+adminName), newCode);
 
     if(saveBtn){
       saveBtn.disabled = false;
@@ -6938,15 +7118,26 @@ async function saveOneAdminCode(email, name){
       saveBtn.style.opacity = '1';
       setTimeout(()=>{ saveBtn.textContent = origText; }, 1500);
     }
-    toast('✅ '+(name||email)+' 코드 저장됨','success');
+    toast('✅ '+adminName+' 코드 저장됨 (즉시 적용)','success');
     loadAdminCodes();
 
-    // ★ 본인 코드 변경 시 재로그인 안내
+    // ★ 본인 코드 변경 시 → 세션/저장코드 제거 후 강제 로그아웃
     if(isMine){
       setTimeout(()=>{
-        if(confirm('⚠️ 본인 코드가 변경되었습니다.\n\n보안상 지금 로그아웃하고 새 코드로 다시 로그인하시겠습니까?\n\n(취소해도 현재 세션은 유지되지만, 다른 기기에서는 로그아웃 시 새 코드 필요)')){
-          if(typeof amtAdminLogout === 'function') amtAdminLogout();
-          else { sessionStorage.clear(); location.replace('index-AMT.html'); }
+        if(confirm('⚠️ 본인 코드가 변경되었습니다.\n\n보안상 지금 로그아웃하고 새 코드로 다시 로그인해야 합니다.')){
+          // 로컬 저장된 모든 인증 정보 제거
+          try{
+            sessionStorage.removeItem('amt_auth_session');
+            localStorage.removeItem('amt_saved_code');
+            localStorage.removeItem('amt_autologin_ok');
+            // 기기 신뢰 표시도 리셋
+            localStorage.removeItem('amt_device_verified_'+btoa(email).replace(/=/g,''));
+          }catch(e){}
+          location.replace('index-AMT.html');
+        } else {
+          // 취소하더라도 저장된 코드는 갱신 필요 - 안 그러면 다음 자동로그인이 옛 코드로 시도
+          localStorage.setItem('amt_saved_code', newCode);
+          toast('⚠️ 저장된 자동로그인 코드도 갱신됨','info');
         }
       }, 800);
     }
@@ -6957,29 +7148,29 @@ async function saveOneAdminCode(email, name){
       saveBtn.textContent = origText;
       saveBtn.style.opacity = '1';
     }
-    if(String(e.message||'').includes('email-already-in-use')){
-      const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
-      await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
-        email, name:name||email, code:newCode,
-        role: email==='kyunghoyou@gmail.com'?'super':'admin',
-        updatedAt: new Date().toISOString()
-      });
-      toast('⚠️ DB 저장됨 (Auth는 이미 존재 - 총관리자가 Firebase Console에서 비밀번호 재설정 필요)','info');
-      loadAdminCodes();
-    } else {
-      toast('❌ 저장 실패: '+e.message,'error');
-    }
+    toast('❌ 저장 실패: '+e.message,'error');
   }
 }
 
 async function deleteAdminCode(email){
   if(!isSuperAdmin()){ toast('총괄관리자만 삭제 가능','error'); return; }
-  if(!confirm(email+' 관리자를 삭제하시겠습니까?\n(Firebase Auth 계정은 Console에서 직접 삭제해야 합니다)')) return;
+  if(!confirm(email+' 관리자를 삭제하시겠습니까?')) return;
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
   const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+
+  // amt_admins에서 이름 찾아서 amt_pw도 같이 삭제
+  let adminName = '';
+  try{
+    const snap = await fb.get(fb.ref(fb.db,'amt_admins/'+key));
+    if(snap.exists()) adminName = snap.val().name || '';
+  }catch(e){}
+
   await fb.set(fb.ref(fb.db,'amt_admins/'+key), null);
-  toast(email+' DB에서 삭제됨','info');
+  if(adminName){
+    await fb.set(fb.ref(fb.db,'amt_pw/'+adminName), null).catch(()=>{});
+  }
+  toast(email+' 삭제됨','info');
   loadAdminCodes();
 }
 
@@ -7075,21 +7266,11 @@ async function saveDealerCode(idx, dealerId){
       if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = origText; saveBtn.style.opacity = '1'; }
       alert('대리점을 찾을 수 없습니다'); return;
     }
+    const oldCode = d.code;
     d.code = newCode;
 
-    // Firebase Auth 자동 동기화 (이메일이 있는 경우)
-    if(d.email){
-      const helpers = window._firebaseHelpers || {};
-      if(helpers.ensureAuthAccount){
-        try{
-          await helpers.ensureAuthAccount(d.email, newCode, d.name);
-        }catch(e){
-          if(!String(e.message||'').includes('email-already-in-use')){
-            console.warn('대리점 Auth 동기화 실패:', e);
-          }
-        }
-      }
-    }
+    // ★ Firebase Auth 동기화 로직 제거됨 - DB(dealers[].code)가 단일 진실 공급원
+    // 대리점이 다음 로그인할 때 index-KY.html이 이 code와 비교함
 
     await fbSaveAll();
     if(saveBtn){
@@ -7098,7 +7279,8 @@ async function saveDealerCode(idx, dealerId){
       saveBtn.style.opacity = '1';
       setTimeout(()=>{ saveBtn.textContent = origText; }, 1500);
     }
-    toast('✅ '+d.name+' 코드 → '+newCode+(d.email?' (Auth 동기화)':'')+' 저장됨','success');
+    const changed = oldCode !== newCode;
+    toast('✅ '+d.name+' 코드 → '+newCode+(changed?' (다음 로그인부터 적용)':'')+' 저장됨','success');
     loadDealerCodes();
   }catch(e){
     if(saveBtn){
@@ -7867,7 +8049,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260418-v10')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v11')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
