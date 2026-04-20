@@ -5120,52 +5120,112 @@ function migrateDueDates(){
 }
 
 /* ═══════════════════════════════════════════════════════
-   ★★★ 동시성 안전 저장 (v15) - Entity-level Versioning ★★★
+   ★★★ 동시성 안전 저장 (v17) - Entity-level + Tombstones ★★★
    각 항목에 _v 타임스탬프 부여 → 병합 시 _v 더 큰 쪽이 승리
+   삭제 → 로컬 제거 + tombstones에 기록 + DB에 기록 → 다른 PC도 제거
    1) 저장 전: 서버 최신 fetch → merge → push 순서로 내 변경 손실 방지
-   2) 리스너: 원격 변경을 즉시 병합 (UPDATE 포함)
-   3) 삭제: sessionStorage로 추적, merge 때 살아나지 않게
+   2) 리스너: 원격 변경을 즉시 병합 (UPDATE + DELETE 포함)
+   3) tombstones: 삭제 기록을 30일간 DB에 보관 → 다른 PC 동기화
 ═══════════════════════════════════════════════════════ */
 
-// 삭제 추적 - session + localStorage 두 곳에 영구 저장
+// ★ 메모리 내 tombstones (DB에도 저장됨)
+// 구조: tombstones = { orders: {id1: ts, id2: ts}, invLogs: {...}, ... }
+let tombstones = {};
+const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30일
+
+function _ensureTombstoneKind(kind){
+  if(!tombstones[kind]) tombstones[kind] = {};
+  return tombstones[kind];
+}
+
+// 삭제 추적 (메모리 tombstones + localStorage fallback)
 function _trackDeleteCore(kind, id){
   if(!id) return;
+  // tombstones 기록 (메모리)
+  const t = _ensureTombstoneKind(kind);
+  t[id] = Date.now();
+  // localStorage에도 저장 (오프라인/저장 실패 대비)
   try{
-    // sessionStorage
+    localStorage.setItem('amt_tombstones', JSON.stringify(tombstones));
+  }catch(e){}
+  try{
+    // 구버전 호환: sessionStorage에도 기록
     const sKey = 'amt_deleted_'+kind;
     const sList = JSON.parse(sessionStorage.getItem(sKey)||'[]');
     if(!sList.includes(id)){ sList.push(id); sessionStorage.setItem(sKey, JSON.stringify(sList)); }
   }catch(e){}
-  try{
-    // localStorage persist
-    const pKey = 'amt_deleted_persist_'+kind;
-    const pList = JSON.parse(localStorage.getItem(pKey)||'[]');
-    if(!pList.includes(id)){ pList.push(id); localStorage.setItem(pKey, JSON.stringify(pList)); }
-  }catch(e){}
 }
-// 외부 호환용 이름들 (모두 동일한 core 호출)
 function _trackDelete(kind, id){ _trackDeleteCore(kind, id); }
 function _trackDeletePersist(kind, id){ _trackDeleteCore(kind, id); }
 
-function _getDeleted(kind){
-  try{ return new Set(JSON.parse(sessionStorage.getItem('amt_deleted_'+kind)||'[]')); }
-  catch(e){ return new Set(); }
-}
-function _clearDeleted(kind){
-  try{ sessionStorage.removeItem('amt_deleted_'+kind); }catch(e){}
-}
-function _getDeletedPersist(kind){
-  const s = _getDeleted(kind);
+// 특정 kind의 삭제된 ID 집합 (tombstones 기준)
+function _getDeletedSet(kind){
+  const s = new Set();
+  const t = tombstones[kind] || {};
+  Object.keys(t).forEach(id => s.add(id));
+  // sessionStorage 구버전 호환
   try{
-    const p = JSON.parse(localStorage.getItem('amt_deleted_persist_'+kind)||'[]');
-    p.forEach(id => s.add(id));
+    const sList = JSON.parse(sessionStorage.getItem('amt_deleted_'+kind)||'[]');
+    sList.forEach(id => s.add(id));
   }catch(e){}
   return s;
+}
+
+// 구버전 호환 alias
+function _getDeleted(kind){ return _getDeletedSet(kind); }
+function _getDeletedPersist(kind){ return _getDeletedSet(kind); }
+function _clearDeleted(kind){
+  try{ sessionStorage.removeItem('amt_deleted_'+kind); }catch(e){}
 }
 function _clearDeletedPersist(kind){
   _clearDeleted(kind);
   try{ localStorage.removeItem('amt_deleted_persist_'+kind); }catch(e){}
 }
+
+// ★ 오래된 tombstone 정리 (TTL 초과분 제거)
+function _pruneTombstones(){
+  const cutoff = Date.now() - TOMBSTONE_TTL_MS;
+  let pruned = 0;
+  Object.keys(tombstones).forEach(kind => {
+    const t = tombstones[kind];
+    Object.keys(t).forEach(id => {
+      if((t[id]||0) < cutoff){
+        delete t[id];
+        pruned++;
+      }
+    });
+    if(Object.keys(t).length === 0) delete tombstones[kind];
+  });
+  if(pruned > 0){
+    try{ localStorage.setItem('amt_tombstones', JSON.stringify(tombstones)); }catch(e){}
+  }
+}
+
+// ★ 원격 tombstones와 로컬 tombstones 합치기 (union)
+function _mergeTombstones(remoteTomb){
+  if(!remoteTomb || typeof remoteTomb !== 'object') return;
+  Object.keys(remoteTomb).forEach(kind => {
+    const rTomb = remoteTomb[kind];
+    if(!rTomb || typeof rTomb !== 'object') return;
+    const lTomb = _ensureTombstoneKind(kind);
+    Object.keys(rTomb).forEach(id => {
+      const remoteTs = Number(rTomb[id])||0;
+      const localTs = Number(lTomb[id])||0;
+      if(remoteTs > localTs) lTomb[id] = remoteTs;
+      else if(!lTomb[id]) lTomb[id] = remoteTs || Date.now();
+    });
+  });
+  try{ localStorage.setItem('amt_tombstones', JSON.stringify(tombstones)); }catch(e){}
+}
+
+// 로드 시점에 localStorage에서 tombstones 복원
+(function _restoreTombstones(){
+  try{
+    const raw = localStorage.getItem('amt_tombstones');
+    if(raw) tombstones = JSON.parse(raw) || {};
+  }catch(e){ tombstones = {}; }
+  _pruneTombstones();
+})();
 
 window._trackDelete = _trackDeleteCore;
 
@@ -5263,6 +5323,12 @@ function _mergeImportPrices(remote){
 // ★ 통합 병합: 원격 전체 스냅샷을 로컬과 합침
 function _mergeRemoteAll(remote){
   if(!remote || typeof remote !== 'object') return;
+
+  // ★★★ 먼저 tombstones 합치기 (이후 _mergeArrByV가 이걸 참조하여 삭제된 항목을 제외)
+  if(remote.tombstones){
+    _mergeTombstones(remote.tombstones);
+  }
+
   _mergeArrByV(orders, remote.orders, 'orders');
   _mergeArrByV(invLogs, remote.invLogs, 'invLogs', {
     afterEach: (i) => { if(!i.company) i.company = 'AMT'; }
@@ -5351,10 +5417,12 @@ async function fbSaveAll(){
 
     // 병합 결과를 서버에 저장
     const now = new Date().toISOString();
+    _pruneTombstones();  // 30일 이상 된 tombstone 제거
     const payload = {
       orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs,
       bestReturns, kyReturns,
       importPrices: (typeof importPrices !== 'undefined' ? importPrices : {}),
+      tombstones,  // ★ 삭제 기록 - 다른 PC도 이걸 보고 삭제 반영
       _updatedAt: now
     };
     try{
@@ -5362,14 +5430,14 @@ async function fbSaveAll(){
       localStorage.setItem('amt_updatedAt', now);
       setLastSync(now);
 
-      // 저장 성공 → 삭제 추적 정리 (서버에도 반영됨)
-      _clearDeletedPersist('orders');
-      _clearDeletedPersist('invLogs');
-      _clearDeletedPersist('dealers');
-      _clearDeletedPersist('internalTrades');
-      _clearDeletedPersist('txLogs');
-      _clearDeletedPersist('bestReturns');
-      _clearDeletedPersist('kyReturns');
+      // 저장 성공 → sessionStorage 삭제 추적 정리 (tombstones는 TTL까지 유지)
+      _clearDeleted('orders');
+      _clearDeleted('invLogs');
+      _clearDeleted('dealers');
+      _clearDeleted('internalTrades');
+      _clearDeleted('txLogs');
+      _clearDeleted('bestReturns');
+      _clearDeleted('kyReturns');
     }catch(e){ console.warn('FB save err', e); }
   } finally {
     _saveInProgress = false;
@@ -8301,7 +8369,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v16')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v17')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
