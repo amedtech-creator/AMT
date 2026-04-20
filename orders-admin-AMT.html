@@ -1923,16 +1923,50 @@ function loadLS(){
     // 기존 invLogs에 company 없으면 AMT로 기본설정
     invLogs.forEach(i=>{ if(!i.company) i.company='AMT'; });
   }catch(e){resetDealers();}
+  // ★ 로드 후 prev snap 초기화 - 로드된 상태를 기준점으로 (이후 변경된 것만 stamp됨)
+  try{ if(typeof _resetPrevSnap === 'function') _resetPrevSnap(); }catch(e){}
 }
+// ★ 변경 감지용 이전 스냅샷 (엔티티별 JSON)
+const _prevSnap = {};
+
+// 변경된 항목만 _v stamp (entity-level 동기화용)
+function _stampChanged(arr, key){
+  if(!Array.isArray(arr)) return;
+  const prev = _prevSnap[key] || {};
+  const now = Date.now();
+  const curr = {};
+  arr.forEach(o => {
+    if(!o || !o.id) return;
+    const oCopy = Object.assign({}, o);
+    delete oCopy._v;  // _v 제외하고 비교
+    const j = JSON.stringify(oCopy);
+    curr[o.id] = j;
+    if(prev[o.id] !== j){
+      // 변경됨 → _v 업데이트
+      o._v = now;
+    }
+  });
+  _prevSnap[key] = curr;
+}
+
 function saveLS(){
   const now=new Date().toISOString();
   localStorage.setItem('amt_updatedAt', now);
+
+  // ★ 변경된 항목에만 _v stamp (동시 편집 안전)
+  _stampChanged(dealers, 'dealers');
+  _stampChanged(orders, 'orders');
+  _stampChanged(invLogs, 'invLogs');
+  _stampChanged(internalTrades, 'internalTrades');
+  _stampChanged(txLogs, 'txLogs');
+  _stampChanged(bestReturns, 'bestReturns');
+  _stampChanged(kyReturns, 'kyReturns');
+
   localStorage.setItem(LS_DEALERS,JSON.stringify(dealers));
   localStorage.setItem(LS_ORDERS,JSON.stringify(orders));
   localStorage.setItem(LS_INV,JSON.stringify(invLogs));
   localStorage.setItem(LS_PRODS,JSON.stringify(products));
   localStorage.setItem(LS_INTERNAL,JSON.stringify(internalTrades));
-  // 감사 로그는 최근 500건만 유지
   if(auditLogs.length>1000) auditLogs=auditLogs.slice(-1000);
   localStorage.setItem(LS_AUDIT,JSON.stringify(auditLogs));
   localStorage.setItem(LS_TX,JSON.stringify(txLogs));
@@ -4967,14 +5001,14 @@ function migrateDueDates(){
 }
 
 /* ═══════════════════════════════════════════════════════
-   ★★★ 동시성 안전 저장 (v14) ★★★
-   여러 관리자가 동시에 같은 데이터를 수정해도 안전하도록:
-   1) 삭제 추적 - 내가 삭제한 ID를 기억해서 merge 때 되살아나지 않게
-   2) 읽기→병합→쓰기를 순차 처리 (최신 remote 기준으로 내 변경만 적용)
-   3) orders/invLogs/dealers/products 등은 ID 기준 개별 항목 단위로 merge
+   ★★★ 동시성 안전 저장 (v15) - Entity-level Versioning ★★★
+   각 항목에 _v 타임스탬프 부여 → 병합 시 _v 더 큰 쪽이 승리
+   1) 저장 전: 서버 최신 fetch → merge → push 순서로 내 변경 손실 방지
+   2) 리스너: 원격 변경을 즉시 병합 (UPDATE 포함)
+   3) 삭제: sessionStorage로 추적, merge 때 살아나지 않게
 ═══════════════════════════════════════════════════════ */
 
-// 삭제 추적 - sessionStorage에만 보관 (세션 종료 시 자동 초기화)
+// 삭제 추적
 function _trackDelete(kind, id){
   if(!id) return;
   try{
@@ -4992,257 +5026,314 @@ function _clearDeleted(kind){
 }
 window._trackDelete = _trackDelete;
 
-// 저장 잠금 - 같은 브라우저에서 동시 fbSaveAll 호출 방지
+// ★ 삭제 추적을 persistent하게 (localStorage에도 저장) - 저장 성공까지 살아있게
+function _trackDeletePersist(kind, id){
+  _trackDelete(kind, id);
+  try{
+    const key = 'amt_deleted_persist_'+kind;
+    const list = JSON.parse(localStorage.getItem(key)||'[]');
+    if(!list.includes(id)){ list.push(id); localStorage.setItem(key, JSON.stringify(list)); }
+  }catch(e){}
+}
+function _getDeletedPersist(kind){
+  try{
+    const s = _getDeleted(kind);
+    const p = JSON.parse(localStorage.getItem('amt_deleted_persist_'+kind)||'[]');
+    p.forEach(id => s.add(id));
+    return s;
+  }catch(e){ return _getDeleted(kind); }
+}
+function _clearDeletedPersist(kind){
+  _clearDeleted(kind);
+  try{ localStorage.removeItem('amt_deleted_persist_'+kind); }catch(e){}
+}
+
+// 모든 _trackDelete 호출을 persistent 버전으로 포워딩 (오래된 호출 코드 호환)
+// - sessionStorage만으로는 탭 닫으면 사라져서 다음 접속 때 살아날 수 있음
+window._trackDelete = _trackDeletePersist;
+
+// ★ 각 항목에 _v 타임스탬프 부여
+// Date.now() 사용 - millisecond precision, 일반적 clock drift는 거의 무시 가능
+function _stampV(obj){
+  if(!obj || typeof obj !== 'object') return obj;
+  obj._v = Date.now();
+  return obj;
+}
+// 배열의 모든 항목에 _v 찍기 (기존 _v가 없을 때만 - 이미 있으면 유지)
+function _stampMissingV(arr){
+  if(!Array.isArray(arr)) return;
+  const now = Date.now();
+  arr.forEach(o => { if(o && typeof o === 'object' && !o._v) o._v = now; });
+}
+// ★ (사용 안 함 - 구버전 호환용 정의만 유지)
+function _stampAllArrays(){
+  _stampMissingV(orders);
+  _stampMissingV(invLogs);
+  _stampMissingV(dealers);
+  _stampMissingV(internalTrades);
+  _stampMissingV(txLogs);
+  _stampMissingV(bestReturns);
+  _stampMissingV(kyReturns);
+  _stampMissingV(auditLogs);
+}
+
+// ★★★ 핵심: entity-level 병합
+// localArr: 메모리 배열 (직접 수정됨), remoteArr: 서버에서 받은 배열, kind: 삭제 추적용
+// 규칙:
+//  - 로컬 ID만 있는 것: 유지 (내가 추가/수정한 것)
+//  - 원격 ID만 있는 것: 내가 삭제한 것 아니면 로컬에 추가
+//  - 양쪽 모두 있는 것: _v 큰 쪽이 승리 (더 최신)
+//  - 원격에 없고 로컬에만 있는데 내가 삭제 추적 중인 것: 제거
+function _mergeArrByV(localArr, remoteArr, kind, opts){
+  if(!Array.isArray(localArr)) return localArr;
+  const remote = Array.isArray(remoteArr) ? remoteArr : [];
+  const deleted = _getDeletedPersist(kind);
+  const byId = new Map();  // id -> 최종 항목
+
+  // 로컬 항목을 먼저 맵에 담음
+  localArr.forEach(o => {
+    if(!o || !o.id) return;
+    if(deleted.has(o.id)) return;  // 내가 삭제한 건 제외
+    byId.set(o.id, o);
+  });
+
+  // 원격 항목 병합
+  remote.forEach(ro => {
+    if(!ro || !ro.id) return;
+    if(deleted.has(ro.id)) return;  // 내가 삭제한 건 무시
+    const local = byId.get(ro.id);
+    if(!local){
+      // 로컬에 없음 → 원격 추가
+      byId.set(ro.id, ro);
+      return;
+    }
+    // 양쪽 모두 있음 → _v 비교
+    const lv = Number(local._v || 0);
+    const rv = Number(ro._v || 0);
+    if(rv > lv){
+      byId.set(ro.id, ro);  // 원격이 더 최신
+    }
+    // lv >= rv이면 로컬 유지
+  });
+
+  // 결과를 localArr에 반영 (기존 배열 참조 유지 - 다른 곳에서 참조 중일 수 있음)
+  localArr.length = 0;
+  byId.forEach(v => localArr.push(v));
+
+  // 옵션: 특수 처리 (예: invLogs는 company 필드 기본값)
+  if(opts && opts.afterEach){
+    localArr.forEach(opts.afterEach);
+  }
+}
+
+// products는 문자열 배열 → 합집합
+function _mergeStringArr(localArr, remoteArr){
+  if(!Array.isArray(localArr) || !Array.isArray(remoteArr)) return;
+  const set = new Set(localArr);
+  remoteArr.forEach(x => { if(x && !set.has(x)){ set.add(x); localArr.push(x); } });
+}
+
+// importPrices는 object → 병합 (서버 값 기반 + 로컬 덮어쓰기)
+function _mergeImportPrices(remote){
+  if(typeof importPrices === 'undefined') return;
+  if(!remote || typeof remote !== 'object') return;
+  // 로컬이 우선이지만 서버에만 있는 키는 로컬에 흡수
+  Object.keys(remote).forEach(k => {
+    if(!(k in importPrices)) importPrices[k] = remote[k];
+  });
+}
+
+// ★ 통합 병합: 원격 전체 스냅샷을 로컬과 합침
+function _mergeRemoteAll(remote){
+  if(!remote || typeof remote !== 'object') return;
+  _mergeArrByV(orders, remote.orders, 'orders');
+  _mergeArrByV(invLogs, remote.invLogs, 'invLogs', {
+    afterEach: (i) => { if(!i.company) i.company = 'AMT'; }
+  });
+  _mergeArrByV(dealers, remote.dealers, 'dealers');
+  _mergeArrByV(internalTrades, remote.internalTrades, 'internalTrades');
+  _mergeArrByV(txLogs, remote.txLogs, 'txLogs');
+  _mergeArrByV(bestReturns, remote.bestReturns, 'bestReturns');
+  _mergeArrByV(kyReturns, remote.kyReturns, 'kyReturns');
+
+  // auditLogs: append-only, 중복 ID만 제거하고 합침
+  if(Array.isArray(remote.auditLogs)){
+    const localIds = new Set(auditLogs.map(l => l && l.id).filter(Boolean));
+    remote.auditLogs.forEach(r => {
+      if(r && r.id && !localIds.has(r.id)){
+        auditLogs.push(r);
+        localIds.add(r.id);
+      }
+    });
+  }
+
+  _mergeStringArr(products, remote.products);
+  _mergeImportPrices(remote.importPrices);
+  // ★ merge 후에는 stamp 없이 바로 localStorage 저장 (_v를 원본 그대로 유지)
+  _saveLSRaw();
+  // ★ merge 이후 prevSnap을 현재 상태로 재설정 (병합된 원격 데이터를 다음 변경 감지의 기준으로)
+  _resetPrevSnap();
+}
+
+// stamp 없이 localStorage만 저장 (merge 직후 사용)
+function _saveLSRaw(){
+  const now=new Date().toISOString();
+  localStorage.setItem('amt_updatedAt', now);
+  localStorage.setItem(LS_DEALERS,JSON.stringify(dealers));
+  localStorage.setItem(LS_ORDERS,JSON.stringify(orders));
+  localStorage.setItem(LS_INV,JSON.stringify(invLogs));
+  localStorage.setItem(LS_PRODS,JSON.stringify(products));
+  localStorage.setItem(LS_INTERNAL,JSON.stringify(internalTrades));
+  if(auditLogs.length>1000) auditLogs=auditLogs.slice(-1000);
+  localStorage.setItem(LS_AUDIT,JSON.stringify(auditLogs));
+  localStorage.setItem(LS_TX,JSON.stringify(txLogs));
+  localStorage.setItem(LS_BEST,JSON.stringify(bestReturns));
+  localStorage.setItem(LS_KY_RET,JSON.stringify(kyReturns));
+  if(isSuperAdmin()) localStorage.setItem('amt_importPrices',JSON.stringify(importPrices));
+}
+
+// merge 후에 _prevSnap을 현재 상태로 재설정
+function _resetPrevSnap(){
+  ['dealers','orders','invLogs','internalTrades','txLogs','bestReturns','kyReturns'].forEach(k => {
+    const arr = {dealers,orders,invLogs,internalTrades,txLogs,bestReturns,kyReturns}[k];
+    if(!Array.isArray(arr)) return;
+    const map = {};
+    arr.forEach(o => {
+      if(!o || !o.id) return;
+      const oCopy = Object.assign({}, o);
+      delete oCopy._v;
+      map[o.id] = JSON.stringify(oCopy);
+    });
+    _prevSnap[k] = map;
+  });
+}
+
+// 저장 잠금
 let _saveInProgress = false;
 let _saveQueue = false;
 
 async function fbSaveAll(){
-  const fb=window._fb; if(!fb||!fb.ready) return;
+  const fb = window._fb;
+  if(!fb || !fb.ready) return;
 
-  // 이미 저장 중이면 큐에 적어두고 종료 (저장 완료 후 한 번 더 실행됨)
   if(_saveInProgress){ _saveQueue = true; return; }
   _saveInProgress = true;
 
   try{
-    const now=new Date().toISOString();
-
-    // ① 최신 remote 가져오기
+    // 서버 최신 fetch
     let remote = null;
     try{
-      const fullSnap = await fb.get(fb.ref(fb.db,'amt_data'));
-      if(fullSnap.exists()) remote = fullSnap.val();
-    }catch(e){ console.warn('[동기화] 원격 읽기 실패, 로컬로 저장 진행:', e); }
+      const snap = await fb.get(fb.ref(fb.db,'amt_data'));
+      if(snap.exists()) remote = snap.val();
+    }catch(e){ console.warn('[동기화] 원격 읽기 실패:', e); }
 
-    // ② 원격이 더 최신이면 병합 - 하지만 내가 삭제한 ID는 제외
-    if(remote && remote._updatedAt){
-      const localTime = localStorage.getItem('amt_updatedAt') || '';
-      if(!localTime || remote._updatedAt > localTime){
-        console.log('[동기화] 원격이 더 최신 - 안전 병합 중...', {remote: remote._updatedAt, local: localTime});
-        _mergeRemoteIntoLocal(remote);
-      } else {
-        // 내가 더 최신이지만, 내가 건드리지 않은 섹션은 원격에서 받아와야 함
-        // (A가 dealers만 수정한 동안 B가 orders만 수정한 경우 등)
-        _mergeRemoteForUntouched(remote);
-      }
+    // 서버 데이터를 로컬에 병합 (내 변경은 _v로 보호됨)
+    if(remote){
+      _mergeRemoteAll(remote);
     }
 
-    // ③ 저장
-    const payload={
+    // 병합 결과를 서버에 저장
+    const now = new Date().toISOString();
+    const payload = {
       orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs,
       bestReturns, kyReturns,
-      importPrices:(typeof importPrices!=='undefined'?importPrices:{}),
-      _updatedAt:now
+      importPrices: (typeof importPrices !== 'undefined' ? importPrices : {}),
+      _updatedAt: now
     };
     try{
       await fb.set(fb.ref(fb.db,'amt_data'), payload);
       localStorage.setItem('amt_updatedAt', now);
       setLastSync(now);
 
-      // ④ 저장 성공 후 삭제 추적 정리 (이미 서버에 반영됨)
-      _clearDeleted('orders');
-      _clearDeleted('invLogs');
-      _clearDeleted('dealers');
-      _clearDeleted('internalTrades');
-      _clearDeleted('txLogs');
-      _clearDeleted('bestReturns');
-    }catch(e){ console.warn('FB save err',e); }
+      // 저장 성공 → 삭제 추적 정리 (서버에도 반영됨)
+      _clearDeletedPersist('orders');
+      _clearDeletedPersist('invLogs');
+      _clearDeletedPersist('dealers');
+      _clearDeletedPersist('internalTrades');
+      _clearDeletedPersist('txLogs');
+      _clearDeletedPersist('bestReturns');
+      _clearDeletedPersist('kyReturns');
+    }catch(e){ console.warn('FB save err', e); }
   } finally {
     _saveInProgress = false;
-    // 저장 중 또 다른 변경이 있었으면 한 번 더 실행
-    if(_saveQueue){ _saveQueue = false; setTimeout(()=>fbSaveAll(), 50); }
+    if(_saveQueue){ _saveQueue = false; setTimeout(() => fbSaveAll(), 50); }
   }
 }
 
-// ★ 서버가 더 최신일 때: 안전 병합 (내 변경은 유지, 서버 변경은 흡수)
-function _mergeRemoteIntoLocal(remote){
-  const delOrders = _getDeleted('orders');
-  const delInv = _getDeleted('invLogs');
-  const delDealers = _getDeleted('dealers');
-  const delInternal = _getDeleted('internalTrades');
-  const delTx = _getDeleted('txLogs');
+// 호환 래퍼
+async function fbSaveDoc(col, id, data){ await fbSaveAll(); }
+async function fbDelDoc(col, id){ await fbSaveAll(); }
 
-  // orders: ID 기준 병합 - 로컬에 있는 건 내가 최근 수정한 것일 수도 있으니 유지,
-  //         서버에만 있는 건 추가 (단, 내가 삭제한 것은 제외)
-  if(remote.orders && Array.isArray(remote.orders)){
-    const localIds = new Set(orders.map(o=>o.id));
-    remote.orders.forEach(ro => {
-      if(!ro || !ro.id) return;
-      if(delOrders.has(ro.id)) return;  // ★ 내가 삭제한 건 다시 살리지 않음
-      if(!localIds.has(ro.id)) orders.push(ro);
-    });
-  }
-  if(remote.invLogs && Array.isArray(remote.invLogs)){
-    const localIds = new Set(invLogs.map(i=>i.id));
-    remote.invLogs.forEach(ri => {
-      if(!ri || !ri.id) return;
-      if(delInv.has(ri.id)) return;
-      if(!localIds.has(ri.id)){ if(!ri.company) ri.company='AMT'; invLogs.push(ri); }
-    });
-  }
-
-  // dealers: 개별 병합 (관리자 수정이지만 여러 명이 동시 수정 가능)
-  if(remote.dealers && Array.isArray(remote.dealers)){
-    const localMap = new Map(dealers.map(d => [d.id, d]));
-    remote.dealers.forEach(rd => {
-      if(!rd || !rd.id) return;
-      if(delDealers.has(rd.id)) return;
-      if(!localMap.has(rd.id)) dealers.push(rd);
-      // 로컬에 이미 있으면 내 버전이 최신이라고 가정해서 유지
-    });
-  }
-
-  // products: 배열의 합집합 (단순 문자열 배열)
-  if(remote.products && Array.isArray(remote.products)){
-    const localSet = new Set(products);
-    remote.products.forEach(p => { if(!localSet.has(p)) products.push(p); });
-  }
-
-  if(remote.internalTrades && Array.isArray(remote.internalTrades)){
-    const localIds = new Set(internalTrades.map(t=>t.id));
-    remote.internalTrades.forEach(r => {
-      if(!r || !r.id) return;
-      if(delInternal.has(r.id)) return;
-      if(!localIds.has(r.id)) internalTrades.push(r);
-    });
-  }
-  if(remote.auditLogs && Array.isArray(remote.auditLogs)){
-    // 감사 로그는 append-only - 서버에 있는 거 모두 흡수
-    const localIds = new Set(auditLogs.map(l=>l.id));
-    remote.auditLogs.forEach(r => { if(r && r.id && !localIds.has(r.id)) auditLogs.push(r); });
-  }
-  if(remote.txLogs && Array.isArray(remote.txLogs)){
-    const localIds = new Set(txLogs.map(l=>l.id));
-    remote.txLogs.forEach(r => {
-      if(!r || !r.id) return;
-      if(delTx.has(r.id)) return;
-      if(!localIds.has(r.id)) txLogs.push(r);
-    });
-  }
-  if(remote.bestReturns && Array.isArray(remote.bestReturns)){
-    const delBest = _getDeleted('bestReturns');
-    const localIds = new Set(bestReturns.map(b=>b.id));
-    remote.bestReturns.forEach(r => {
-      if(!r || !r.id) return;
-      if(delBest.has(r.id)) return;
-      if(!localIds.has(r.id)) bestReturns.push(r);
-    });
-  }
-  if(remote.kyReturns && Array.isArray(remote.kyReturns)){
-    const localIds = new Set(kyReturns.map(k=>k.id));
-    remote.kyReturns.forEach(r => { if(r && r.id && !localIds.has(r.id)) kyReturns.push(r); });
-  }
-  if(remote.importPrices && typeof importPrices !== 'undefined'){
-    importPrices = Object.assign({}, remote.importPrices, importPrices);
-  }
-  saveLS();
-}
-
-// ★ 내가 더 최신일 때도 내가 건드리지 않은 섹션은 원격 값 흡수
-// (예: 내가 orders만 수정 중인 동안 다른 사용자가 dealers 수정한 경우)
-function _mergeRemoteForUntouched(remote){
-  // audit log는 항상 append-only이므로 원격에 있는 것은 모두 흡수
-  if(remote.auditLogs && Array.isArray(remote.auditLogs)){
-    const localIds = new Set(auditLogs.map(l=>l.id));
-    remote.auditLogs.forEach(r => { if(r && r.id && !localIds.has(r.id)) auditLogs.push(r); });
-  }
-  // 다른 것들은 로컬이 이미 최신이라고 신뢰
-}
-
-// 개별 호출 래퍼 (기존 코드 호환 유지 - 실제로는 전체 저장)
-async function fbSaveDoc(col,id,data){
-  // 데이터는 이미 메모리에 반영된 상태이므로 전체 저장
-  await fbSaveAll();
-}
-async function fbDelDoc(col,id){
-  await fbSaveAll();
-}
-
-// 마지막 동기화 시각 표시
+// 동기화 시각 표시
 function setLastSync(isoStr){
-  const d=new Date(isoStr);
-  const hm=d.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
-  const md=(d.getMonth()+1)+'/'+(d.getDate());
-  document.getElementById('syncLabel').textContent='동기화 '+md+' '+hm;
-  document.getElementById('syncDot').classList.remove('off');
-  document.getElementById('syncDot').classList.add('pulse');
-  setTimeout(()=>document.getElementById('syncDot').classList.remove('pulse'),3000);
+  const d = new Date(isoStr);
+  const hm = d.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+  const md = (d.getMonth()+1)+'/'+(d.getDate());
+  const el = document.getElementById('syncLabel'); if(el) el.textContent = '동기화 '+md+' '+hm;
+  const dot = document.getElementById('syncDot');
+  if(dot){
+    dot.classList.remove('off');
+    dot.classList.add('pulse');
+    setTimeout(() => dot.classList.remove('pulse'), 3000);
+  }
 }
 
-// 수동 동기화 (한 번 fetch + 최신 판정)
+// 수동 동기화: 서버 최신 fetch → merge → push 하되 UI refresh까지
 async function fbSync(){
-  const fb=window._fb;
-  if(!fb||!fb.ready){
-    toast('❌ Firebase 미연결 — 설정 탭에서 모든 항목 + Database URL 입력 후 저장 → 새로고침!','error');
-    // 설정탭으로 자동 이동
-    const settingsBtn=document.querySelector('[data-page="settings"]');
+  const fb = window._fb;
+  if(!fb || !fb.ready){
+    toast('❌ Firebase 미연결','error');
+    const settingsBtn = document.querySelector('[data-page="settings"]');
     if(settingsBtn) settingsBtn.click();
     return;
   }
   try{
-    const snap=await fb.get(fb.ref(fb.db,'amt_data'));
-    if(!snap.exists()){ toast('서버에 데이터 없음 - 현재 로컬 데이터를 업로드합니다','info'); await fbSaveAll(); return; }
-    const remote=snap.val();
-    const remoteTime=remote._updatedAt||'';
-    const localTime=localStorage.getItem('amt_updatedAt')||'';
-    if(!localTime || remoteTime > localTime){
-      // 서버가 더 최신
-      _applyRemote(remote);
-      toast('✅ 서버 최신 데이터로 동기화 완료 ('+new Date(remoteTime).toLocaleTimeString('ko-KR')+')','success');
-    } else {
-      // 로컬이 더 최신 → 서버에 업로드
+    const snap = await fb.get(fb.ref(fb.db,'amt_data'));
+    if(!snap.exists()){
+      toast('서버에 데이터 없음 - 로컬을 업로드합니다','info');
       await fbSaveAll();
-      toast('✅ 로컬 최신 데이터를 서버에 업로드 완료','success');
+      refreshAll();
+      return;
     }
+    // 병합 후 저장
+    _mergeRemoteAll(snap.val());  // 원격 흡수
+    await fbSaveAll();  // 다시 저장 (병합 결과 반영)
     refreshAll();
-  }catch(e){ toast('동기화 실패: '+e.message,'error'); }
-}
-
-// 서버 데이터를 로컬에 적용
-function _applyRemote(remote){
-  if(remote.orders) orders=remote.orders;
-  if(remote.invLogs){ invLogs=remote.invLogs; invLogs.forEach(i=>{ if(!i.company) i.company='AMT'; }); }
-  if(remote.dealers){
-    // ★ 서버 데이터 적용 시 기존 로컬 code 필드 보존 (서버에 code가 없는 경우)
-    const localDealerMap = {};
-    dealers.forEach(d=>{ if(d.code) localDealerMap[d.id]=d.code; });
-    dealers = remote.dealers;
-    dealers.forEach(d=>{
-      if(!d.code && localDealerMap[d.id]) d.code = localDealerMap[d.id];
-    });
+    toast('✅ 동기화 완료','success');
+  }catch(e){
+    toast('동기화 실패: '+e.message,'error');
   }
-  if(remote.products) products=remote.products;
-  if(remote.internalTrades) internalTrades=remote.internalTrades;
-  if(remote.auditLogs) auditLogs=remote.auditLogs;
-  if(remote.txLogs) txLogs=remote.txLogs;
-  if(remote.bestReturns) bestReturns=remote.bestReturns;
-  if(remote.kyReturns) kyReturns=remote.kyReturns;
-  if(remote.importPrices) importPrices=remote.importPrices;
-  const now=remote._updatedAt||new Date().toISOString();
-  localStorage.setItem('amt_updatedAt', now);
-  saveLS();
-  setLastSync(now);
 }
 
-// 실시간 리스너 등록 (다른 기기 변경사항 자동 수신)
+// ★ 실시간 리스너: 원격 변경 즉시 병합 (UPDATE 포함)
 function fbStartListener(){
-  const fb=window._fb; if(!fb||!fb.ready) return;
-  if(_fbListener) return; // 이미 등록됨
-  let firstCall=true;
-  _fbListener = fb.onValue(fb.ref(fb.db,'amt_data'), (snap)=>{
-    if(firstCall){ firstCall=false; return; } // 최초 호출(현재값)은 fbSync에서 처리
+  const fb = window._fb;
+  if(!fb || !fb.ready) return;
+  if(_fbListener) return;
+  let firstCall = true;
+  _fbListener = fb.onValue(fb.ref(fb.db,'amt_data'), (snap) => {
+    if(firstCall){ firstCall = false; return; }
     if(!snap.exists()) return;
-    // ★ 내가 저장 중이면 원격 수신을 스킵 (저장 완료 후 다음 리스너 이벤트에서 처리)
-    if(_saveInProgress){ return; }
-    const remote=snap.val();
-    const remoteTime=remote._updatedAt||'';
-    const localTime=localStorage.getItem('amt_updatedAt')||'';
+    // 내가 저장 중이면 스킵 (내 저장이 완료되면 다음 이벤트로 다시 옴)
+    if(_saveInProgress) return;
+
+    const remote = snap.val();
+    const remoteTime = remote._updatedAt || '';
+    const localTime = localStorage.getItem('amt_updatedAt') || '';
+
+    // ★ 항상 병합 실행 (UPDATE 감지를 위해 조건 없이)
+    //   _v 기반이라 내 최신 변경은 보호됨
+    _mergeRemoteAll(remote);
+
+    // 타임스탬프는 큰 쪽으로 갱신 (감사로그 append 등에 영향)
     if(remoteTime > localTime){
-      // ★ 다른 기기에서 변경됨 - 안전 병합 사용 (덮어쓰기 X)
-      _mergeRemoteIntoLocal(remote);
-      // auditLogs는 append-only이므로 원격 타임스탬프로 업데이트
       localStorage.setItem('amt_updatedAt', remoteTime);
       setLastSync(remoteTime);
-      refreshAll();
+    }
+    refreshAll();
+
+    // 변경 알림 (원격이 나보다 확실히 새로울 때만)
+    if(remoteTime > localTime){
       toast('📱 다른 기기에서 데이터가 업데이트되었습니다','info');
     }
   });
@@ -8093,7 +8184,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v14')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v15')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
