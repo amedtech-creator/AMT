@@ -3343,15 +3343,26 @@ async function saveInternal(){
 }
 
 async function deleteInternal(id){
-  if(!confirm('이 내부거래를 삭제할까요? (관련 재고이력도 함께 삭제됩니다)')) return;
-  const t=internalTrades.find(x=>x.id===id);
+  const t = internalTrades.find(x=>x.id===id);
+  if(!t){ toast('거래를 찾을 수 없습니다','error'); return; }
+  if(!confirm(`이 내부거래를 삭제할까요?\n${t.date} ${t.product} ${fmt(t.qty)}개 ${fmt(t.total)}원\n(관련 재고이력도 함께 삭제됩니다)`)) return;
+  await requireOtp(`AMT→KY 물품공급 삭제 (${t.product} ${fmt(t.qty)}개)`, async () => {
+    await _doDeleteInternal(id);
+  });
+}
+
+async function _doDeleteInternal(id){
+  const t = internalTrades.find(x=>x.id===id);
   if(t) addAuditLog('delete','내부거래',`삭제: ${t.product} ${fmt(t.qty)}개 ${fmt(t.total)}원 (${t.date})`,t);
   _trackDelete('internalTrades', id);
-  internalTrades=internalTrades.filter(t=>t.id!==id);
+  internalTrades = internalTrades.filter(t=>t.id!==id);
   invLogs.forEach(i => { if(i.relInternal === id) _trackDelete('invLogs', i.id); });
-  invLogs=invLogs.filter(i=>i.relInternal!==id);
+  invLogs = invLogs.filter(i=>i.relInternal!==id);
+  // 관련 txLogs도 삭제 (AMT→KY 물품공급 거래 로그)
+  txLogs.forEach(tx => { if(tx.relInternal === id) _trackDelete('txLogs', tx.id); });
+  txLogs = txLogs.filter(tx => tx.relInternal !== id);
   saveLS();
-  await fbDelDoc('internal',id);
+  await fbSaveAll();
   toast('내부거래 삭제','info');
   refreshAll();
 }
@@ -3387,7 +3398,7 @@ function renderInternalList(){
     </div>
     <div class="table-wrap"><table>
       <thead><tr>
-        <th>거래일</th><th>거래방향</th><th>제품</th><th>수량</th><th>단가</th><th>금액</th><th>메모</th><th style="text-align:center">삭제</th>
+        <th>거래일</th><th>거래방향</th><th>제품</th><th>수량</th><th>단가</th><th>금액</th><th>메모</th><th style="text-align:center">수정/삭제</th>
       </tr></thead>
       <tbody>
       ${list.map(t=>{
@@ -3404,7 +3415,10 @@ function renderInternalList(){
           <td class="td-mono td-r">${fmt(t.price)}</td>
           <td class="td-mono td-r" style="font-weight:700;color:var(--internal)">${fmt(t.total)}</td>
           <td style="font-size:.75rem;color:var(--text2)">${t.memo||''}</td>
-          <td class="td-c"><button class="btn btn-danger btn-xs" onclick="deleteInternal('${t.id}')">✕</button></td>
+          <td class="td-c" style="white-space:nowrap">
+            <button class="btn btn-outline btn-xs" onclick="editInternal('${t.id}')" style="margin-right:4px">✏️</button>
+            <button class="btn btn-danger btn-xs" onclick="deleteInternal('${t.id}')">✕</button>
+          </td>
         </tr>`;
       }).join('')}
       </tbody>
@@ -3494,7 +3508,7 @@ function renderAdjHistory(){
           <th class="td-r">조정금액</th>
           <th>메모</th>
           <th>등록일시</th>
-          <th class="td-c">삭제</th>
+          <th class="td-c">수정/삭제</th>
         </tr>
       </thead>
       <tbody>
@@ -3518,7 +3532,8 @@ function renderAdjHistory(){
           </td>
           <td style="font-size:.75rem;color:var(--text2);max-width:120px;overflow:hidden;text-overflow:ellipsis">${t.memo||''}</td>
           <td class="td-mono" style="font-size:.72rem;color:var(--text3);white-space:nowrap">${createdAt}</td>
-          <td class="td-c">
+          <td class="td-c" style="white-space:nowrap">
+            <button class="btn btn-outline btn-xs" onclick="editAdjEntry('${t.id}')" style="margin-right:4px">✏️</button>
             <button class="btn btn-danger btn-xs" onclick="deleteAdjEntry('${t.id}')">✕</button>
           </td>
         </tr>`;
@@ -3542,6 +3557,110 @@ async function deleteAdjEntry(id){
     renderDebtSummary();
     renderAdjHistory();
     renderTxList();
+  });
+}
+
+// ★ 채무조정 수정 (OTP 필요) - prompt 기반 간편 수정
+async function editAdjEntry(id){
+  const t = txLogs.find(x => x.id === id);
+  if(!t){ toast('항목을 찾을 수 없습니다','error'); return; }
+
+  const newDateStr = prompt(`[채무조정 수정]\n\n날짜 (YYYY-MM-DD):`, t.date || '');
+  if(newDateStr === null) return;
+  const newDate = (newDateStr||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(newDate)){ toast('날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)','error'); return; }
+
+  const newAmtStr = prompt(`조정금액 (부호 포함, 예: 10000 또는 -5000):`, String(t.adjAmt || 0));
+  if(newAmtStr === null) return;
+  const newAmt = parseFloat((newAmtStr||'').replace(/,/g,'').trim());
+  if(!isFinite(newAmt)){ toast('금액이 올바르지 않습니다','error'); return; }
+
+  const newMemo = prompt('메모:', t.memo || '');
+  if(newMemo === null) return;
+
+  if(!confirm(`이 내용으로 수정할까요?\n\n날짜: ${newDate}\n금액: ${fmt(newAmt)}원\n메모: ${newMemo}`)) return;
+
+  await requireOtp(`채무조정 수정 (${txTypeLabel(t.type)})`, async () => {
+    const before = Object.assign({}, t);
+    t.date = newDate;
+    t.adjAmt = newAmt;
+    t.memo = newMemo;
+    t.updatedAt = new Date().toISOString();
+    addAuditLog('edit','채권채무',
+      `채무조정 수정: ${txTypeLabel(t.type)} ${fmt(before.adjAmt||0)}원→${fmt(newAmt)}원 (${before.date}→${newDate})`, before);
+    saveLS(); await fbSaveAll();
+    toast('채무조정 수정 완료','info');
+    renderDebtSummary();
+    renderAdjHistory();
+    renderTxList();
+  });
+}
+
+// ★ AMT→KY 물품공급 수정 (OTP 필요) - prompt 기반 간편 수정
+async function editInternal(id){
+  const t = internalTrades.find(x => x.id === id);
+  if(!t){ toast('항목을 찾을 수 없습니다','error'); return; }
+
+  const newDateStr = prompt(`[AMT→KY 물품공급 수정]\n\n날짜 (YYYY-MM-DD):`, t.date || '');
+  if(newDateStr === null) return;
+  const newDate = (newDateStr||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(newDate)){ toast('날짜 형식이 올바르지 않습니다','error'); return; }
+
+  const newProduct = prompt('제품명:', t.product || '');
+  if(newProduct === null) return;
+  const prod = (newProduct||'').trim().toUpperCase();
+  if(!prod){ toast('제품명을 입력하세요','error'); return; }
+
+  const newQtyStr = prompt('수량:', String(t.qty || 0));
+  if(newQtyStr === null) return;
+  const newQty = parseInt((newQtyStr||'').replace(/,/g,'').trim(), 10);
+  if(!isFinite(newQty) || newQty <= 0){ toast('수량이 올바르지 않습니다','error'); return; }
+
+  const newPriceStr = prompt('단가:', String(t.price || 0));
+  if(newPriceStr === null) return;
+  const newPrice = parseFloat((newPriceStr||'').replace(/,/g,'').trim());
+  if(!isFinite(newPrice) || newPrice < 0){ toast('단가가 올바르지 않습니다','error'); return; }
+
+  const newMemo = prompt('메모:', t.memo || '');
+  if(newMemo === null) return;
+
+  const newTotal = newQty * newPrice;
+  if(!confirm(`이 내용으로 수정할까요?\n\n날짜: ${newDate}\n제품: ${prod}\n수량: ${fmt(newQty)}개\n단가: ${fmt(newPrice)}원\n금액: ${fmt(newTotal)}원\n메모: ${newMemo}`)) return;
+
+  await requireOtp(`물품공급 수정 (${prod} ${fmt(newQty)}개)`, async () => {
+    const before = Object.assign({}, t);
+    t.date = newDate;
+    t.product = prod;
+    t.qty = newQty;
+    t.price = newPrice;
+    t.total = newTotal;
+    t.memo = newMemo;
+    t.updatedAt = new Date().toISOString();
+
+    // 연결된 invLogs도 업데이트 (재고 동기화)
+    invLogs.forEach(i => {
+      if(i.relInternal === id){
+        i.date = newDate;
+        i.product = prod;
+        if(i.company === 'AMT') i.qty = -newQty;
+        if(i.company === 'KY') i.qty = newQty;
+      }
+    });
+
+    // 연결된 txLogs(AMT_to_KY) 업데이트
+    txLogs.forEach(tx => {
+      if(tx.relInternal === id){
+        tx.date = newDate;
+        tx.amount = newTotal;
+        tx.memo = prod + ' ' + fmt(newQty) + '개' + (newMemo ? ' (' + newMemo + ')' : '');
+      }
+    });
+
+    addAuditLog('edit','내부거래',
+      `물품공급 수정: ${before.product} ${fmt(before.qty)}개→${prod} ${fmt(newQty)}개 (${before.date}→${newDate})`, before);
+    saveLS(); await fbSaveAll();
+    toast('물품공급 수정 완료','success');
+    refreshAll();
   });
 }
 
@@ -5008,15 +5127,26 @@ function migrateDueDates(){
    3) 삭제: sessionStorage로 추적, merge 때 살아나지 않게
 ═══════════════════════════════════════════════════════ */
 
-// 삭제 추적
-function _trackDelete(kind, id){
+// 삭제 추적 - session + localStorage 두 곳에 영구 저장
+function _trackDeleteCore(kind, id){
   if(!id) return;
   try{
-    const key = 'amt_deleted_'+kind;
-    const list = JSON.parse(sessionStorage.getItem(key)||'[]');
-    if(!list.includes(id)){ list.push(id); sessionStorage.setItem(key, JSON.stringify(list)); }
+    // sessionStorage
+    const sKey = 'amt_deleted_'+kind;
+    const sList = JSON.parse(sessionStorage.getItem(sKey)||'[]');
+    if(!sList.includes(id)){ sList.push(id); sessionStorage.setItem(sKey, JSON.stringify(sList)); }
+  }catch(e){}
+  try{
+    // localStorage persist
+    const pKey = 'amt_deleted_persist_'+kind;
+    const pList = JSON.parse(localStorage.getItem(pKey)||'[]');
+    if(!pList.includes(id)){ pList.push(id); localStorage.setItem(pKey, JSON.stringify(pList)); }
   }catch(e){}
 }
+// 외부 호환용 이름들 (모두 동일한 core 호출)
+function _trackDelete(kind, id){ _trackDeleteCore(kind, id); }
+function _trackDeletePersist(kind, id){ _trackDeleteCore(kind, id); }
+
 function _getDeleted(kind){
   try{ return new Set(JSON.parse(sessionStorage.getItem('amt_deleted_'+kind)||'[]')); }
   catch(e){ return new Set(); }
@@ -5024,33 +5154,20 @@ function _getDeleted(kind){
 function _clearDeleted(kind){
   try{ sessionStorage.removeItem('amt_deleted_'+kind); }catch(e){}
 }
-window._trackDelete = _trackDelete;
-
-// ★ 삭제 추적을 persistent하게 (localStorage에도 저장) - 저장 성공까지 살아있게
-function _trackDeletePersist(kind, id){
-  _trackDelete(kind, id);
-  try{
-    const key = 'amt_deleted_persist_'+kind;
-    const list = JSON.parse(localStorage.getItem(key)||'[]');
-    if(!list.includes(id)){ list.push(id); localStorage.setItem(key, JSON.stringify(list)); }
-  }catch(e){}
-}
 function _getDeletedPersist(kind){
+  const s = _getDeleted(kind);
   try{
-    const s = _getDeleted(kind);
     const p = JSON.parse(localStorage.getItem('amt_deleted_persist_'+kind)||'[]');
     p.forEach(id => s.add(id));
-    return s;
-  }catch(e){ return _getDeleted(kind); }
+  }catch(e){}
+  return s;
 }
 function _clearDeletedPersist(kind){
   _clearDeleted(kind);
   try{ localStorage.removeItem('amt_deleted_persist_'+kind); }catch(e){}
 }
 
-// 모든 _trackDelete 호출을 persistent 버전으로 포워딩 (오래된 호출 코드 호환)
-// - sessionStorage만으로는 탭 닫으면 사라져서 다음 접속 때 살아날 수 있음
-window._trackDelete = _trackDeletePersist;
+window._trackDelete = _trackDeleteCore;
 
 // ★ 각 항목에 _v 타임스탬프 부여
 // Date.now() 사용 - millisecond precision, 일반적 clock drift는 거의 무시 가능
@@ -8184,7 +8301,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v15')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260419-v16')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
