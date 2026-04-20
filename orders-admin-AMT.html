@@ -2259,6 +2259,9 @@ function refreshAll(){
   renderDebtSummary();
   renderBestReturnList();
   renderTxList();
+  // ★ Fix: 대리점관리↔설정 양방향 자동 동기화
+  const wrap = document.getElementById('dealerCodeListWrap');
+  if(wrap && wrap.offsetParent !== null) renderDealerCodeList(dealers);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -4640,6 +4643,7 @@ async function _doSaveDealer(){
     const finalCode = code || d.code || '';
     const oldEmail = d.email;
     Object.assign(d,{name,email,code:finalCode,term,fee,note,products:prods});
+    d._v = Date.now(); // ★ Fix: 병합 시 이 변경이 최신임을 보장
     await fbSaveDoc('dealers',d.id,d);
     // ★ 이메일이 바뀌었거나 새 이메일이면 Auth 계정 생성 (더미PW)
     if(email && email !== oldEmail){
@@ -4652,7 +4656,7 @@ async function _doSaveDealer(){
       toast('✅ 코드 변경됨 - 즉시 다음 로그인부터 적용','info');
     }
   } else {
-    const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods};
+    const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods,_v:Date.now()};
     dealers.push(d);
     addAuditLog('create','대리점',`추가: ${name} (이메일: ${email})`);
     await fbSaveDoc('dealers',d.id,d);
@@ -5402,6 +5406,10 @@ async function fbSaveAll(){
   if(_saveInProgress){ _saveQueue = true; return; }
   _saveInProgress = true;
 
+  // ★ Fix: saveLS를 먼저 호출해서 변경된 항목의 _v를 stamp한 후 병합
+  // (saveDealerCode / _doSaveDealer 등이 saveLS 없이 fbSaveAll만 부르는 경우 대비)
+  saveLS();
+
   try{
     // 서버 최신 fetch
     let remote = null;
@@ -5441,6 +5449,12 @@ async function fbSaveAll(){
     }catch(e){ console.warn('FB save err', e); }
   } finally {
     _saveInProgress = false;
+    // ★ Fix: 저장 중 수신했던 원격 업데이트 지금 처리
+    if(_pendingRemoteSnap){
+      const snap = _pendingRemoteSnap;
+      _pendingRemoteSnap = null;
+      setTimeout(() => _applyRemoteSnap(snap), 0);
+    }
     if(_saveQueue){ _saveQueue = false; setTimeout(() => fbSaveAll(), 50); }
   }
 }
@@ -5491,6 +5505,22 @@ async function fbSync(){
 }
 
 // ★ 실시간 리스너: 원격 변경 즉시 병합 (UPDATE 포함)
+let _pendingRemoteSnap = null; // ★ 저장 중 수신한 원격 스냅 임시 보관
+
+function _applyRemoteSnap(remote){
+  const remoteTime = remote._updatedAt || '';
+  const localTime = localStorage.getItem('amt_updatedAt') || '';
+  _mergeRemoteAll(remote);
+  if(remoteTime > localTime){
+    localStorage.setItem('amt_updatedAt', remoteTime);
+    setLastSync(remoteTime);
+  }
+  refreshAll();
+  if(remoteTime > localTime){
+    toast('📱 다른 기기에서 데이터가 업데이트되었습니다','info');
+  }
+}
+
 function fbStartListener(){
   const fb = window._fb;
   if(!fb || !fb.ready) return;
@@ -5499,28 +5529,14 @@ function fbStartListener(){
   _fbListener = fb.onValue(fb.ref(fb.db,'amt_data'), (snap) => {
     if(firstCall){ firstCall = false; return; }
     if(!snap.exists()) return;
-    // 내가 저장 중이면 스킵 (내 저장이 완료되면 다음 이벤트로 다시 옴)
-    if(_saveInProgress) return;
 
-    const remote = snap.val();
-    const remoteTime = remote._updatedAt || '';
-    const localTime = localStorage.getItem('amt_updatedAt') || '';
-
-    // ★ 항상 병합 실행 (UPDATE 감지를 위해 조건 없이)
-    //   _v 기반이라 내 최신 변경은 보호됨
-    _mergeRemoteAll(remote);
-
-    // 타임스탬프는 큰 쪽으로 갱신 (감사로그 append 등에 영향)
-    if(remoteTime > localTime){
-      localStorage.setItem('amt_updatedAt', remoteTime);
-      setLastSync(remoteTime);
+    // ★ Fix: 저장 중이면 스킵하지 않고 임시 보관 → 저장 완료 후 처리
+    // (Firebase는 스킵된 이벤트를 재전송하지 않으므로 반드시 보관해야 함)
+    if(_saveInProgress){
+      _pendingRemoteSnap = snap.val();
+      return;
     }
-    refreshAll();
-
-    // 변경 알림 (원격이 나보다 확실히 새로울 때만)
-    if(remoteTime > localTime){
-      toast('📱 다른 기기에서 데이터가 업데이트되었습니다','info');
-    }
+    _applyRemoteSnap(snap.val());
   });
 }
 
@@ -7588,6 +7604,8 @@ async function saveDealerCode(idx, dealerId){
     }
     const oldCode = d.code;
     d.code = newCode;
+    d._v = Date.now(); // ★ Fix: 병합 시 이 변경이 최신임을 보장
+    saveLS();          // ★ Fix: _prevSnap 갱신 (fbSaveAll 내부에서 중복 호출되지만 안전)
 
     // ★ Firebase Auth 동기화 로직 제거됨 - DB(dealers[].code)가 단일 진실 공급원
     // 대리점이 다음 로그인할 때 index-KY.html이 이 code와 비교함
@@ -7602,6 +7620,7 @@ async function saveDealerCode(idx, dealerId){
     const changed = oldCode !== newCode;
     toast('✅ '+d.name+' 코드 → '+newCode+(changed?' (다음 로그인부터 적용)':'')+' 저장됨','success');
     loadDealerCodes();
+    refreshAll(); // ★ Fix: 대리점관리 탭도 즉시 동기화
   }catch(e){
     if(saveBtn){
       saveBtn.disabled = false;
