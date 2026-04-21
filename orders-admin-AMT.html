@@ -2237,7 +2237,9 @@ function init(){
   // Firebase 자동 동기화 + 일 1회 자동 백업 + 비밀번호 자동동기화
   const fb=window._fb;
   if(fb&&fb.ready){
-    fbSync().then(()=>{ fbStartListener(); fbBackupToday(); });
+    const _sess = JSON.parse(sessionStorage.getItem('amt_auth_session')||'{}');
+    const _canBackup = _sess.email==='kyunghoyou@gmail.com' || _sess.email==='amedtech@gmail.com';
+    fbSync().then(()=>{ fbStartListener(); if(_canBackup) fbBackupToday(); });
   }
   // 저장된 비밀번호 입력칸에 채우기 + 배너 표시
   loadSyncPasswordUI();
