@@ -121,20 +121,25 @@ async function verifyCodeInDb(email, code){
   email = (email||'').toLowerCase().trim();
   code = (code||'').trim();
   if(!email || !code) return { ok:false, reason:'empty' };
-  if(!ADMINS[email]) return { ok:false, reason:'not_admin_email' };
 
   try{
     const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+    console.log('[Login] DB 조회 키:', key, '/ 경로: amt_admins/'+key);
     const snap = await get(ref(db,'amt_admins/'+key));
+    console.log('[Login] snap.exists():', snap.exists(), snap.exists() ? snap.val() : '(없음)');
     if(snap.exists()){
       const adm = snap.val();
+      console.log('[Login] DB코드:', adm.code, '/ 입력코드:', code, '/ 일치:', String(adm.code||'') === code);
       if(String(adm.code||'') === code){
-        return { ok:true, role:adm.role||ADMINS[email], name:adm.name||'', email };
+        return { ok:true, role:adm.role||(ADMINS[email]||'admin'), name:adm.name||'', email };
       }
       return { ok:false, reason:'code_mismatch' };
     }
-    return { ok:false, reason:'no_codes' };
+    // DB에 없지만 하드코딩 목록에는 있는 경우 (코드 미설정)
+    if(ADMINS[email]) return { ok:false, reason:'no_codes' };
+    return { ok:false, reason:'not_admin_email' };
   }catch(e){
+    console.error('[Login] DB 조회 에러:', e);
     return { ok:false, reason:'db_error', message:e.message };
   }
 }
@@ -203,7 +208,6 @@ window.doLogin = async () => {
   const email = document.getElementById('email').value.trim();
   const pw    = document.getElementById('pw').value.trim();
   if(!email||!pw){ showMsg('loginMsg','이메일과 코드번호를 입력하세요','error'); return; }
-  if(!ADMINS[email.toLowerCase()]){ showMsg('loginMsg','등록된 관리자 이메일이 아닙니다','error'); return; }
 
   const btn = document.getElementById('loginBtn');
   btn.classList.add('loading');
@@ -215,6 +219,7 @@ window.doLogin = async () => {
     btn.classList.remove('loading');
     btn.disabled = false;
     let msg = '❌ 코드번호가 틀립니다';
+    if(res.reason==='not_admin_email') msg = '❌ 등록된 관리자 이메일이 아닙니다';
     if(res.reason==='db_error') msg = '❌ 서버 오류: '+(res.message||'');
     if(res.reason==='no_codes') msg = '❌ 관리자 코드 미설정';
     if(res.reason==='auth_legacy') msg = '⚠️ Firebase Auth 재설정 필요 - Console에서 옛 계정 삭제하세요';
