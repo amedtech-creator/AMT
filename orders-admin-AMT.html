@@ -7512,17 +7512,39 @@ async function deleteAdminCode(email){
 
 async function addAdminCode(){
   if(!isSuperAdmin()){ toast('총괄관리자만 추가 가능','error'); return; }
-  const name = (document.getElementById('newAdminName').value||'').trim();
+  const name  = (document.getElementById('newAdminName').value||'').trim();
   const email = (document.getElementById('newAdminEmail').value||'').trim().toLowerCase();
-  const code = (document.getElementById('newAdminCode').value||'').trim();
+  const code  = (document.getElementById('newAdminCode').value||'').trim();
   if(!name||!email||!code){ alert('이름/이메일/코드 모두 입력'); return; }
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ alert('이메일 형식이 올바르지 않습니다'); return; }
   if(!/^\d{4,10}$/.test(code)){ alert('코드는 숫자 4~10자리'); return; }
 
-  await saveOneAdminCode(email, name); // 내부적으로 Auth 생성 + DB 저장
-  document.getElementById('newAdminName').value='';
-  document.getElementById('newAdminEmail').value='';
-  document.getElementById('newAdminCode').value='';
+  // ★ Fix: saveOneAdminCode는 기존 행의 DOM input(acode_xxx)에서 코드를 읽는 구조라
+  //         신규 추가 시엔 해당 input이 없어 코드가 ''가 됨 → 직접 FB 저장으로 우회
+  const fb = window._fb;
+  if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
+  const key  = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
+  const role = email==='kyunghoyou@gmail.com' ? 'super' : 'admin';
+
+  try{
+    toast('💾 저장 중...','info');
+    try{ await ensureAuthAccount(email, code, name); }
+    catch(e){ console.warn('Auth 계정 보장 실패', e); }
+
+    await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
+      email, name, code, role,
+      updatedAt: new Date().toISOString()
+    });
+
+    document.getElementById('newAdminName').value  = '';
+    document.getElementById('newAdminEmail').value = '';
+    document.getElementById('newAdminCode').value  = '';
+    toast('✅ '+name+' 추가 완료','success');
+    loadAdminCodes();
+  }catch(e){
+    console.error(e);
+    toast('❌ 추가 실패: '+e.message,'error');
+  }
 }
 
 // ── 대리점 이메일/코드 관리 ──
