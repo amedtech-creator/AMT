@@ -591,6 +591,292 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
 .firebase-input-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;}
 </style>
 </head>
+<!-- ★ EmailJS 거래명세서 자동발송 -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+emailjs.init('QEu2X7xZAl1qXvQAI');
+
+// ══════════════════════════════════════════════════════
+//  ㈜케이와이메디칼 — 거래명세서 자동발송 모듈
+//  service: service_bz3i3j6 / template: template_gpbeyhn
+// ══════════════════════════════════════════════════════
+
+// ── 대리점 마스터 (코드 → 사업자정보 + 이메일) ──────────────
+const DEALER_MASTER = {
+  "000736": { regNo:"359-86-01337",  ceo:"천경원",  email:"ykhymj2@naver.com",
+            address:"서울 영등포구 선유로3길 10, 3층 317,318호<br>(문래동5가, 하우스디 비즈)",
+            products:{ "JUC":{catNo:"BM5001VB",price:40000,delivery:false} } },
+  "002504": { regNo:"225-86-02445",  ceo:"최성수",  email:"ykhymj2@naver.com",
+            address:"경기도 부천시 석천로170번길 19, 4층 405호 (중동,부광프라자)",
+            products:{ "DELL":{catNo:"BK7004ZC",price:900,delivery:false},
+                       "JUC":{catNo:"BM5001VB",price:33000,delivery:false},
+                       "MEDIAS T":{catNo:"BK7000ZC",price:1550,delivery:false} } },
+  "008382": { regNo:"598-81-00068",  ceo:"이동준",  email:"ykhymj2@naver.com",
+            address:"경기도 고양시 일산동구 호수로 646-30",
+            products:{ "DELL":{catNo:"BK7004ZC",price:1100,delivery:true,deliveryFee:4500} } },
+  "008382N": { regNo:"598-81-00068",  ceo:"이동준",  email:"ykhymj2@naver.com",
+            address:"경기도 고양시 일산동구 호수로 646-30",
+            products:{ "DELL":{catNo:"BK7004ZC",price:1100,delivery:false} } },
+  "007929": { regNo:"142-81-60034",  ceo:"김현일",  email:"ykhymj2@naver.com",
+            address:"경기도 용인시 수지구 용구대로 2776, 3층",
+            products:{ "JUC":{catNo:"BM5001VB",price:35000,delivery:false} } },
+  "009616": { regNo:"179-86-00504",  ceo:"권기업",  email:"ykhymj2@naver.com",
+            address:"경기도 안산시 단원구 풍전로 37-9",
+            products:{ "MEDIAS T":{catNo:"BK7000ZC",price:2100,delivery:false},
+                       "DELL":{catNo:"BK7004ZC",price:1000,delivery:false} } },
+  "005720": { regNo:"213-45-00970",  ceo:"김남경",  email:"ykhymj2@naver.com",
+            address:"경기도 파주시 청석로 268, 807-10호 (동패동, 미소시티)",
+            products:{ "DELL":{catNo:"BK7004ZC",price:990,delivery:true,deliveryFee:4500} } },
+  "005720N": { regNo:"213-45-00970",  ceo:"김남경",  email:"ykhymj2@naver.com",
+            address:"경기도 파주시 청석로 268, 807-10호 (동패동, 미소시티)",
+            products:{ "DELL":{catNo:"BK7004ZC",price:990,delivery:false} } },
+  "002456": { regNo:"479-81-02334",  ceo:"설인식",  email:"ykhymj2@naver.com",
+            address:"경기도 부천시 장말로166번길 23, 지층(상동)",
+            products:{ "MEDIAS T":{catNo:"BK7000ZC",price:1750,delivery:false},
+                       "JUC":{catNo:"BM5001VB",price:33000,delivery:false} } },
+  "011233": { regNo:"723-86-01576",  ceo:"이 종 순",  email:"ykhymj2@naver.com",
+            address:"부산광역시 남구 수영로 30-9 (문현동)",
+            products:{ "JUC":{catNo:"BM5001VB",price:36300,delivery:false} } },
+  "012456": { regNo:"763-28-00600",  ceo:"설 인 식",  email:"ykhymj2@naver.com",
+            address:"서울특별시 동작구 등용로 38",
+            products:{ "JUC":{catNo:"BM5001VB",price:33000,delivery:false},
+                       "MEDIAS T":{catNo:"BK7000ZC",price:1750,delivery:false} } },
+  "000082": { regNo:"503-24-36420",  ceo:"강정순",  email:"ykhymj2@naver.com",
+            address:"대구광역시 남구 자유길 104",
+            products:{ "JUC":{catNo:"BM5001VB",price:40000,delivery:false} } },
+  "001233": { regNo:"773-86-03467",  ceo:"조인호",  email:"ykhymj2@naver.com",
+            address:"부산광역시 남구 수영로 30-9, 2층(문현동, 일부)",
+            products:{ "JUC":{catNo:"BM5001VB",price:36300,delivery:false} } },
+  "005511": { regNo:"111-82-02809",  ceo:"김학중",  email:"ykhymj2@naver.com",
+            address:"서울시 은평구 갈현동 395-1",
+            products:{ "JUC":{catNo:"BM5001VB",price:80000,delivery:false} } },
+  "123456": { regNo:"110-81-98909",  ceo:"김진아",  email:"ykhymj2@naver.com",
+            address:"서울시 통일로 98",
+            products:{ "JUC":{catNo:"BM5001VB",price:10000,delivery:true,deliveryFee:3000},
+                       "DELL":{catNo:"BK7004ZC",price:1000,delivery:true,deliveryFee:3000},
+                       "MEDIAS T":{catNo:"BK7000ZC",price:10,delivery:true,deliveryFee:3000} } },
+  "123456N": { regNo:"110-81-98909",  ceo:"김진아",  email:"ykhymj2@naver.com",
+            address:"서울시 통일로 98",
+            products:{ "JUC":{catNo:"BM5001VB",price:10000,delivery:false},
+                       "DELL":{catNo:"BK7004ZC",price:1000,delivery:false},
+                       "MEDIAS T":{catNo:"BK7000ZC",price:10,delivery:false} } }
+};
+// ── 공급자 고정 정보 ─────────────────────────────────────────
+const KY_SUPPLIER = {
+  regNo:"110-86-00994", name:"㈜ 케이와이메디칼",
+  ceo:"강 승 섭", address:"서울시 은평구 통일로87길 18-6,<br> 2층"
+};
+
+// ── 대리점 코드 찾기 (dealers 배열 또는 DEALER_MASTER) ────────
+function _getDealerMaster(dealerIdOrCode, dealerName) {
+  // 1) dealers 배열에서 code로 직접 매칭
+  if(typeof dealers !== 'undefined') {
+    const d = dealers.find(x => x.id === dealerIdOrCode || x.name === dealerName);
+    if(d && d.code && DEALER_MASTER[d.code]) return { ...DEALER_MASTER[d.code], name: d.name };
+    if(d && DEALER_MASTER[dealerIdOrCode]) return { ...DEALER_MASTER[dealerIdOrCode], name: d.name };
+  }
+  // 2) 코드 직접 매칭
+  if(DEALER_MASTER[dealerIdOrCode]) return { ...DEALER_MASTER[dealerIdOrCode], name: dealerName||dealerIdOrCode };
+  // 3) 이름으로 매칭 시도
+  const found = Object.entries(DEALER_MASTER).find(([,v]) => dealerName && v.address && dealerName.includes && dealerName.length > 0);
+  return found ? { ...found[1], name: dealerName } : null;
+}
+
+// ── 거래명세서 HTML 생성 ─────────────────────────────────────
+function buildStatementHTML(items, dealerName, dealerInfo, orderId) {
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}년 ${today.getMonth()+1}월 ${today.getDate()}일`;
+  const hasDelivery = items.some(i => i.delivery);
+  const PROD_DISPLAY = { 'MEDIAS': 'MEDIAS T', 'MEDIAS T': 'MEDIAS T', 'JUC': 'JUC SPRAY DRESSING 10ml' };
+
+  const rows = items.map((item, i) => {
+    const amt = item.qty * item.unitPrice;
+    const displayName = PROD_DISPLAY[item.product] || item.product;
+    return `<tr>
+      <td style="border:1px solid #aaa;padding:6px 8px;text-align:center;font-size:12px">${i+1}</td>
+      <td style="border:1px solid #aaa;padding:6px 8px;text-align:center;font-size:12px">${item.catNo||''}</td>
+      <td style="border:1px solid #aaa;padding:6px 8px;font-size:12px">${displayName}</td>
+      <td style="border:1px solid #aaa;padding:6px 8px;text-align:center;font-size:12px">${item.qty.toLocaleString()} ea</td>
+      <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${item.unitPrice.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${amt.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+
+  // 택배비: 아이템에서 deliveryFee 읽기, 없으면 dealerInfo.deliveryFee, 없으면 3000
+  const deliveryFeeAmt = hasDelivery ? (
+    (items.find(i=>i.delivery && i.deliveryFee) || {deliveryFee: dealerInfo.deliveryFee || 3000}).deliveryFee
+  ) : 0;
+  const deliveryRow = hasDelivery ? `<tr>
+    <td style="border:1px solid #aaa;padding:6px 8px"></td>
+    <td style="border:1px solid #aaa;padding:6px 8px"></td>
+    <td style="border:1px solid #aaa;padding:6px 8px;font-size:12px">택배비</td>
+    <td style="border:1px solid #aaa;padding:6px 8px"></td>
+    <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${deliveryFeeAmt.toLocaleString()}</td>
+    <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${deliveryFeeAmt.toLocaleString()}</td>
+  </tr>` : '';
+
+  const emptyCount = Math.max(0, 15 - items.length - (hasDelivery ? 1 : 0));
+  const emptyRows = Array(emptyCount).fill(`<tr>
+    <td style="border:1px solid #aaa;padding:5px 8px;height:22px"></td>
+    <td style="border:1px solid #aaa"></td><td style="border:1px solid #aaa"></td>
+    <td style="border:1px solid #aaa"></td>
+    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
+    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
+  </tr>`).join('');
+
+  const blankRow = `<tr>
+    <td style="border:1px solid #aaa;padding:5px 8px"></td>
+    <td style="border:1px solid #aaa"></td>
+    <td style="border:1px solid #aaa;text-align:center;font-size:11px;color:#999;padding:5px 8px">***** 이 하 여 백 *****</td>
+    <td style="border:1px solid #aaa"></td>
+    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
+    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
+  </tr>`;
+
+  const total      = items.reduce((s,i) => s + i.qty * i.unitPrice, 0) + (hasDelivery ? deliveryFeeAmt : 0);
+  const supplyAmt  = Math.round(total / 1.1);
+  const vatAmt     = total - supplyAmt;
+
+  // 사업자주소 라벨: "사업자" 아래 "주소" 두 줄
+  const addrLbl = `<span style="display:block;line-height:1.5">사업자</span><span style="display:block;line-height:1.5">주소</span>`;
+
+  return `<div style="font-family:'맑은 고딕',Arial,sans-serif;max-width:720px;margin:0 auto;padding:28px 32px;color:#111;background:#fff">
+  <h2 style="text-align:center;font-size:26px;letter-spacing:14px;margin:0 0 20px;padding-bottom:14px;border-bottom:2px solid #111;font-weight:normal">거 래 명 세 서</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">
+    <tr>
+      <td style="width:12px;vertical-align:middle;font-size:10px;line-height:2;color:#555;text-align:center;padding:0 2px">공<br>급<br>자</td>
+      <td style="vertical-align:top;width:44%">
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;width:52px;font-size:11px;color:#555;white-space:nowrap">등록번호</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${KY_SUPPLIER.regNo}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">상 호</td><td style="border:1px solid #aaa;padding:5px 7px;font-weight:bold;font-size:11px">${KY_SUPPLIER.name}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">대표자명</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${KY_SUPPLIER.ceo}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555;vertical-align:top">${addrLbl}</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${KY_SUPPLIER.address}</td></tr>
+        </table>
+      </td>
+      <td style="width:10px"></td>
+      <td style="width:12px;vertical-align:middle;font-size:10px;line-height:2;color:#555;text-align:center;padding:0 2px">공<br>급<br><br>받<br>는<br>자</td>
+      <td style="vertical-align:top">
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;width:52px;font-size:11px;color:#555;white-space:nowrap">등록번호</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${dealerInfo.regNo||''}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">상 호</td><td style="border:1px solid #aaa;padding:5px 7px;font-weight:bold;font-size:11px">${dealerName}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">대표자명</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${dealerInfo.ceo||''}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555;vertical-align:top">${addrLbl}</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${dealerInfo.address||''}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+  <table style="width:100%;font-size:11px;margin-bottom:6px">
+    <tr><td>일련 No : <strong>${orderId||''}</strong></td><td style="text-align:center">발행일자 : ${dateStr}</td><td style="text-align:right">Page : 1</td></tr>
+  </table>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:0">
+    <thead><tr style="background:#f2f2f2">
+      <th style="border:1px solid #aaa;padding:7px 5px;width:28px">순위</th>
+      <th style="border:1px solid #aaa;padding:7px 5px;width:82px">Code<br>Cat-No.</th>
+      <th style="border:1px solid #aaa;padding:7px 5px">품 명 / Description</th>
+      <th style="border:1px solid #aaa;padding:7px 5px;width:66px">수량<br>Quantity</th>
+      <th style="border:1px solid #aaa;padding:7px 5px;width:84px">단가<br>Unit Price</th>
+      <th style="border:1px solid #aaa;padding:7px 5px;width:96px">금액<br>Amount</th>
+    </tr></thead>
+    <tbody>${rows}${deliveryRow}${blankRow}${emptyRows}</tbody>
+  </table>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
+    <tr>
+      <td style="border:1px solid #aaa;padding:7px 10px;width:28px"></td>
+      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold;width:82px"></td>
+      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold">매 출 액</td>
+      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold">부가가치세</td>
+      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold">합 계</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #aaa;padding:7px 10px"></td>
+      <td style="border:1px solid #aaa;padding:7px 10px"></td>
+      <td style="border:1px solid #aaa;padding:7px 10px;text-align:right;font-weight:bold">${supplyAmt.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:7px 10px;text-align:right;font-weight:bold">${vatAmt.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:7px 10px;text-align:right;font-weight:bold">${total.toLocaleString()}</td>
+    </tr>
+  </table>
+  <p style="font-size:11px;color:#999;border-top:1px solid #ddd;padding-top:10px;margin:0;text-align:center">
+    본 명세서는 ㈜케이와이메디칼에서 자동 발송된 문서입니다. &nbsp;|&nbsp; 문의: amedtech@gmail.com
+  </p>
+</div>`;
+}
+
+// ── 실제 EmailJS 발송 공통 함수 ──────────────────────────────
+async function sendStatementEmail(dealerName, dealerEmail, orderId, statementHTML) {
+  await emailjs.send('service_bz3i3j6', 'template_gpbeyhn', {
+    dealer_name:    dealerName,
+    dealer_email:   dealerEmail,
+    order_number:   orderId,
+    statement_html: statementHTML
+  });
+}
+
+// ── [경로1] KY주문 출고 시 발송 ─────────────────────────────
+async function sendStatementOnKyShip(order) {
+  try {
+    // dealers 배열에서 code 찾기
+    let dealerCode = null;
+    if(typeof dealers !== 'undefined') {
+      const d = dealers.find(x => x.id === order.dealerId || x.name === order.dealerName);
+      if(d) dealerCode = d.code;
+    }
+    // 택배비 유무: 발주에 fee>0이면 택배비 있는 버전 사용, 없으면 N버전 우선
+    const hasDeliveryFee = (order.fee || 0) > 0;
+    // 택배비 없는 버전 코드 (008382N, 005720N)
+    const altCode = dealerCode && !hasDeliveryFee ? (dealerCode + 'N') : null;
+    const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
+                 : (dealerCode ? DEALER_MASTER[dealerCode] : null);
+    if(!master) { console.warn('거래명세서: 대리점 마스터 없음 →', order.dealerName); return; }
+
+    const items = (order.items||[]).map(i => {
+      const pd = master.products[i.product] || {};
+      return {
+        product:   i.product,
+        catNo:     pd.catNo || '',
+        qty:       Math.abs(i.qty),
+        unitPrice: pd.price || i.price || 0,
+        delivery:  pd.delivery || false
+      };
+    });
+
+    const html = buildStatementHTML(items, order.dealerName, master, order.id);
+    await sendStatementEmail(order.dealerName, master.email, order.id, html);
+    console.log('✅ 거래명세서 발송 완료 →', master.email);
+  } catch(e) {
+    console.error('거래명세서 발송 실패:', e);
+    toast('⚠️ 출고 완료, 거래명세서 발송 실패: ' + e.message, 'error');
+  }
+}
+
+// ── [경로2] AMT 발주저장 시 발송 ────────────────────────────
+async function sendStatementOnAmtOrder(order, dealer) {
+  try {
+    let dealerCode = dealer.code || null;
+    // 택배비 유무: 발주에 fee>0이면 택배비 있는 버전, 없으면 N버전 우선
+    const hasDeliveryFee = (order.fee || 0) > 0;
+    const altCode = dealerCode && !hasDeliveryFee ? (dealerCode + 'N') : null;
+    const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
+                 : (dealerCode ? DEALER_MASTER[dealerCode] : null);
+    if(!master) { console.warn('거래명세서: 대리점 마스터 없음 →', dealer.name); return; }
+
+    const pd = master.products[order.product] || {};
+    const items = [{
+      product:   order.product,
+      catNo:     pd.catNo || '',
+      qty:       Math.abs(order.qty),
+      unitPrice: order.price || pd.price || 0,
+      delivery:  pd.delivery || false
+    }];
+
+    const html = buildStatementHTML(items, dealer.name, master, order.id);
+    await sendStatementEmail(dealer.name, master.email, order.id, html);
+    console.log('✅ 거래명세서 발송 완료 →', master.email);
+  } catch(e) {
+    console.error('거래명세서 발송 실패:', e);
+    toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
+  }
+}
+</script>
 <body>
 
 
@@ -1978,42 +2264,45 @@ function saveLS(){
 /* ═══ 기본 대리점 데이터 ═══ */
 function resetDealers(){
   dealers=[
-    {id:'ricomedi', name:'주식회사 리코메디',
+    {id:'ricomedi', name:'주식회사 리코메디', code:'000736',
      products:[{product:'JUC',price:40000}],
      term:'same', fee:0, note:'발주당일 입금'},
-    {id:'kmb', name:'(주)케이엠비',
-     products:[{product:'JUC',price:33000}],
+    {id:'kmb', name:'(주)케이엠비', code:'011233',
+     products:[{product:'JUC',price:36300}],
      term:'same', fee:0, note:'발주당일 입금'},
-    {id:'fronta', name:'주식회사 프론타코리아',
-     products:[{product:'JUC',price:33000}],
+    {id:'fronta', name:'주식회사 프론타코리아', code:'001233',
+     products:[{product:'JUC',price:36300}],
      term:'same', fee:0, note:'발주당일 입금'},
-    {id:'sungju', name:'(주)성주약품',
+    {id:'sungju', name:'(주)성주약품', code:'007929',
      products:[{product:'JUC',price:35000}],
      term:'same_next', fee:0, note:'발주당일 또는 다음날'},
-    {id:'jinsung', name:'진성메디칼(강정순)',
+    {id:'jinsung', name:'진성메디칼', code:'000082',
      products:[{product:'JUC',price:40000}],
      term:'eom', fee:0, note:'발주월 말일'},
-    {id:'sib', name:'에스아이비 컴퍼니(설인식)',
-     products:[{product:'JUC',price:33000}],
-     term:'eom_next', fee:0, note:'다음달 말일'},
-    {id:'chungu', name:'(의법)청구성심',
-     products:[{product:'JUC',price:80000,priceOld:132000,priceOldUntil:'2026-03'}],
-     term:'3m_19', fee:0, note:'3개월 뒤 19일 / 2026.03이전 132,000원'},
-    {id:'lsb', name:'(주)엘에스비컴퍼니',
+    {id:'sib', name:'에스아이비 컴퍼니', code:'012456',
      products:[{product:'JUC',price:33000},{product:'MEDIAS',price:1750}],
      term:'eom_next', fee:0, note:'다음달 말일'},
-    {id:'mediplus', name:'(주)메디플스',
+    {id:'chungu', name:'(의법)청구성심병원', code:'005511',
+     products:[{product:'JUC',price:80000,priceOld:132000,priceOldUntil:'2026-03'}],
+     term:'3m_19', fee:0, note:'3개월 뒤 19일 / 2026.03이전 132,000원'},
+    {id:'lsb', name:'(주)엘에스비컴퍼니', code:'002456',
+     products:[{product:'JUC',price:33000},{product:'MEDIAS',price:1750}],
+     term:'eom_next', fee:0, note:'다음달 말일'},
+    {id:'mediplus', name:'주식회사 메디플스', code:'002504',
      products:[{product:'JUC',price:33000},{product:'DELL',price:900},{product:'MEDIAS',price:1550}],
      term:'eom', fee:0, note:'발주월 말일'},
-    {id:'sinwoo', name:'신우엠비티',
-     products:[{product:'MEDIAS',price:1100}],
+    {id:'sinwoo', name:'주식회사 신우', code:'009616',
+     products:[{product:'MEDIAS',price:2100},{product:'DELL',price:1000}],
      term:'eom', fee:0, note:'발주월 말일'},
-    {id:'nkbio', name:'김남경(엔케이바이오)',
+    {id:'nkbio', name:'엔케이바이오', code:'005720',
      products:[{product:'DELL',price:990}],
      term:'eom', fee:4500, note:'발주월 말일 / 택배비 별도'},
-    {id:'seojung', name:'주식회사서정메디케어',
+    {id:'seojung', name:'(주)서정메디케어', code:'008382',
      products:[{product:'DELL',price:1100}],
-     term:'same', fee:4500, note:'발주당일 / 택배비 별도'}
+     term:'same', fee:4500, note:'발주당일 / 택배비 별도'},
+    {id:'test', name:'테스트', code:'123456',
+     products:[{product:'JUC',price:10000},{product:'DELL',price:1000},{product:'MEDIAS',price:10}],
+     term:'same', fee:3000, note:'택배비 별도 3,000원'}
   ];
 }
 
@@ -2461,6 +2750,12 @@ async function _doSaveOrder(){
     }catch(e){ console.warn('KY주문 자동등록 실패:', e); }
   }
 
+  // ★ 거래명세서 자동 이메일 발송 (발주저장 시)
+  sendStatementOnAmtOrder(order, dealer).catch(()=>{});
+
+  // ★ 전자세금계산서 반자동 — 데이터 팝업
+  try { openTaxModal(buildTaxDataFromAmtOrder(order, dealer)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
+
   toast(`발주 저장 완료 ✓ 수금예정: ${dueDate}`,'success');
   document.getElementById('oMsg').textContent=`저장됨 · 수금예정 ${dueDate}`;
   setTimeout(()=>document.getElementById('oMsg').textContent='',4000);
@@ -2501,7 +2796,7 @@ function renderDash(){
     }
   });
 
-  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','DELL':'var(--dell)'};
+  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','MEDIAS T':'var(--medias)','DELL':'var(--dell)'};
   const prodCountText=products.map(p=>`${p} ${fmt((prodSales[p]&&prodSales[p].cnt)||0)}건`).join(' · ');
 
   document.getElementById('dashKpi').innerHTML=`
@@ -3179,7 +3474,7 @@ function switchInvCompany(company, btn){
 }
 
 function renderInvCards(){
-  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','DELL':'var(--dell)'};
+  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','MEDIAS T':'var(--medias)','DELL':'var(--dell)'};
   const company=_curInvCompany;
   const color=company==='AMT'?'var(--amt)':'var(--ky)';
 
@@ -3237,7 +3532,7 @@ function renderInvHistory(){
   const mo=document.getElementById('invFilterM').value;
   const prod=document.getElementById('invFilterP').value;
   const company=document.getElementById('invFilterC')?document.getElementById('invFilterC').value:'';
-  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','DELL':'var(--dell)'};
+  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','MEDIAS T':'var(--medias)','DELL':'var(--dell)'};
 
   let list=[...invLogs].sort((a,b)=>b.date.localeCompare(a.date));
   if(mo) list=list.filter(i=>i.date.startsWith(mo));
@@ -3382,7 +3677,7 @@ function renderInternalList(){
 
   if(!list.length){ document.getElementById('internalList').innerHTML=emptyHtml('내부거래 내역이 없습니다'); return; }
 
-  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','DELL':'var(--dell)'};
+  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','MEDIAS T':'var(--medias)','DELL':'var(--dell)'};
   const totalQty=list.reduce((s,t)=>s+t.qty,0);
   const totalAmt=list.reduce((s,t)=>s+t.total,0);
 
@@ -4387,7 +4682,7 @@ function renderDealerCards(){
     }
     return termLabels[term] || term;
   };
-  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','DELL':'var(--dell)'};
+  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','MEDIAS T':'var(--medias)','DELL':'var(--dell)'};
 
   if(!dealers.length){ document.getElementById('dealerCards').innerHTML=emptyHtml('대리점이 없습니다'); return; }
   document.getElementById('dealerCards').innerHTML=`<div class="dealer-cards">${dealers.map(d=>`
@@ -4779,7 +5074,7 @@ function renderReport(){
     pm[o.product].total+=o.total; pm[o.product].qty+=o.qty; pm[o.product].cnt++;
   });
   const pRows=Object.entries(pm).sort((a,b)=>b[1].total-a[1].total);
-  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','DELL':'var(--dell)'};
+  const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','MEDIAS T':'var(--medias)','DELL':'var(--dell)'};
   document.getElementById('rptProduct').innerHTML=pRows.length?`<div class="table-wrap"><table>
     <thead><tr><th>제품</th><th>건수</th><th>수량</th><th>매출액</th><th>평균단가</th></tr></thead>
     <tbody>${pRows.map(([p,d])=>`<tr>
@@ -7068,6 +7363,13 @@ async function kyConfirmAction(orderId, targetStatus){
     // ★ 텔레그램 주문상태 알림 (총관리자)
     sendTelegramOrderStatus(o, targetStatus, note, now).catch(()=>{});
 
+    // ★ 거래명세서 자동 이메일 발송 (일반 출고 시만)
+    if(targetStatus === 'shipped' && o.orderType !== 'return' && o.orderType !== 'exchange'){
+      sendStatementOnKyShip(o).catch(()=>{});
+      // ★ 전자세금계산서 반자동 — 데이터 팝업
+      try { openTaxModal(buildTaxDataFromKyOrder(o)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
+    }
+
     toast('✅ '+o.dealerName+' → '+(lbl[targetStatus]||targetStatus),'success');
     kyCloseDetail();
 
@@ -8426,5 +8728,227 @@ if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   });
 }
 </script>
+
+<!-- ★ 전자세금계산서 반자동 모달 -->
+<div id="taxModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:12px;width:100%;max-width:580px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25)">
+    <!-- 헤더 -->
+    <div style="background:#1e40af;color:#fff;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:15px;font-weight:700">전자세금계산서 발행 데이터</div>
+        <div style="font-size:11px;opacity:.8;margin-top:2px">홈택스에 복사·붙여넣기 하세요</div>
+      </div>
+      <button onclick="closeTaxModal()" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px">✕ 닫기</button>
+    </div>
+    <!-- 안내 배너 -->
+    <div style="background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:10px 20px;font-size:12px;color:#1e40af;display:flex;align-items:center;gap:8px">
+      <span style="font-size:16px">📋</span>
+      <span>각 항목 옆 <b>[복사]</b> 버튼을 눌러 홈택스에 붙여넣기 하세요. 작성 완료 후 공인인증서로 발행하시면 됩니다.</span>
+    </div>
+    <!-- 내용 -->
+    <div style="padding:16px 20px" id="taxContent"></div>
+    <!-- 하단 버튼 -->
+    <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="openHometax()" style="padding:10px 20px;background:#16a34a;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer">🏛️ 홈택스 열기</button>
+      <button onclick="copyAllTax()" style="padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer">📋 전체 복사</button>
+      <button onclick="closeTaxModal()" style="padding:10px 20px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:13px;cursor:pointer">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 세금계산서 모달 열기 ────────────────────────────────────
+function openTaxModal(data) {
+  // data: { supplierRegNo, supplierName, supplierCeo, supplierAddr,
+  //         dealerRegNo, dealerName, dealerCeo, dealerAddr,
+  //         issueDate, items:[{product,qty,unitPrice,amount}], total, supplyAmt, taxAmt }
+  const supplyAmt = data.supplyAmt || Math.round(data.total / 1.1);
+  const taxAmt    = data.taxAmt    || (data.total - supplyAmt);
+
+  const rows = (data.items||[]).map((item,i) => `
+    <tr style="border-bottom:1px solid #f3f4f6">
+      <td style="padding:7px 8px;font-size:12px;color:#374151">${i+1}</td>
+      <td style="padding:7px 8px;font-size:12px">${item.product}</td>
+      <td style="padding:7px 8px;font-size:12px;text-align:center">${(item.qty||0).toLocaleString()}</td>
+      <td style="padding:7px 8px;font-size:12px;text-align:right">${(item.unitPrice||0).toLocaleString()}</td>
+      <td style="padding:7px 8px;font-size:12px;text-align:right">${(item.amount||0).toLocaleString()}</td>
+    </tr>`).join('');
+
+  document.getElementById('taxContent').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <!-- 공급자 -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:8px;text-transform:uppercase">공급자</div>
+        ${taxField('사업자번호', '110-86-00994')}
+        ${taxField('상호', '㈜케이와이메디칼')}
+        ${taxField('대표자', '강승섭')}
+        ${taxField('주소', '서울시 은평구 통일로87길 18-6, 2층')}
+      </div>
+      <!-- 공급받는자 -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:8px;text-transform:uppercase">공급받는자</div>
+        ${taxField('사업자번호', data.dealerRegNo||'')}
+        ${taxField('상호', data.dealerName||'')}
+        ${taxField('대표자', data.dealerCeo||'')}
+        ${taxField('주소', data.dealerAddr||'')}
+      </div>
+    </div>
+
+    <!-- 작성일자 / 금액 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+      ${taxField('작성일자', data.issueDate||'')}
+      ${taxField('공급가액', supplyAmt.toLocaleString()+'원')}
+      ${taxField('세액 (10%)', taxAmt.toLocaleString()+'원')}
+    </div>
+
+    <!-- 품목 -->
+    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:14px">
+      <div style="background:#f1f5f9;padding:8px 12px;font-size:11px;font-weight:700;color:#475569">품목 내역</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:#f8fafc;font-size:11px;color:#64748b">
+            <th style="padding:7px 8px;text-align:left;width:24px">No</th>
+            <th style="padding:7px 8px;text-align:left">품명</th>
+            <th style="padding:7px 8px;text-align:center;width:56px">수량</th>
+            <th style="padding:7px 8px;text-align:right;width:80px">단가</th>
+            <th style="padding:7px 8px;text-align:right;width:88px">공급가액</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr style="background:#f1f5f9;font-weight:700;font-size:12px">
+            <td colspan="4" style="padding:8px 12px;text-align:right">합계 (공급가액+세액)</td>
+            <td style="padding:8px 12px;text-align:right;color:#1e40af">${data.total.toLocaleString()}원</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- 이메일 (홈택스 전송용) -->
+    <div style="background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:10px 12px;font-size:12px;color:#854d0e">
+      <b>💡 홈택스 전송 이메일:</b> ${data.dealerEmail||'미등록 — 홈택스에서 직접 입력'}
+    </div>
+  `;
+
+  // 전체 복사용 텍스트 저장
+  window._taxCopyText = [
+    '[공급자] 사업자번호: 110-86-00994 / 상호: ㈜케이와이메디칼 / 대표자: 강승섭',
+    '[공급받는자] 사업자번호: '+(data.dealerRegNo||'') +' / 상호: '+(data.dealerName||'')+' / 대표자: '+(data.dealerCeo||''),
+    '작성일자: '+(data.issueDate||''),
+    '공급가액: '+supplyAmt.toLocaleString()+'원 / 세액: '+taxAmt.toLocaleString()+'원 / 합계: '+data.total.toLocaleString()+'원',
+    '--- 품목 ---',
+    ...(data.items||[]).map((i,idx)=>`${idx+1}. ${i.product} / 수량: ${i.qty} / 단가: ${i.unitPrice.toLocaleString()} / 금액: ${i.amount.toLocaleString()}`),
+    '전송이메일: '+(data.dealerEmail||'미등록')
+  ].join('\n');
+
+  const modal = document.getElementById('taxModal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function taxField(label, value) {
+  const id = 'tf_'+Math.random().toString(36).slice(2,7);
+  return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+    <span style="font-size:11px;color:#64748b;min-width:58px;flex-shrink:0">${label}</span>
+    <span id="${id}" style="font-size:12px;font-weight:600;color:#111;flex:1;word-break:break-all">${value}</span>
+    <button onclick="copyText('${id}')" style="flex-shrink:0;padding:2px 7px;background:#e0e7ff;color:#3730a3;border:none;border-radius:4px;font-size:10px;cursor:pointer;font-weight:700">복사</button>
+  </div>`;
+}
+
+function copyText(id) {
+  const el = document.getElementById(id);
+  if(!el) return;
+  navigator.clipboard.writeText(el.textContent).then(() => {
+    const btn = el.nextElementSibling;
+    if(btn){ const orig=btn.textContent; btn.textContent='✓'; btn.style.background='#dcfce7'; btn.style.color='#166534'; setTimeout(()=>{ btn.textContent=orig; btn.style.background='#e0e7ff'; btn.style.color='#3730a3'; },1200); }
+  });
+}
+
+function copyAllTax() {
+  navigator.clipboard.writeText(window._taxCopyText||'').then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✅ 복사됨';
+    setTimeout(()=>btn.textContent=orig, 1500);
+  });
+}
+
+function openHometax() {
+  window.open('https://www.hometax.go.kr/websquare/websquare.wss?w2xPath=/ui/pp/index_pp.xml&menuCd=PM03140&targetMenuCd=PM03140', '_blank');
+}
+
+function closeTaxModal() {
+  document.getElementById('taxModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// ── KY출고 → 세금계산서 데이터 빌드 ────────────────────────
+function buildTaxDataFromKyOrder(order) {
+  let dealerCode = null;
+  if(typeof dealers !== 'undefined') {
+    const d = dealers.find(x => x.id === order.dealerId || x.name === order.dealerName);
+    if(d) dealerCode = d.code;
+  }
+  const hasDeliveryFee = (order.fee || 0) > 0;
+  const altCode = dealerCode && !hasDeliveryFee ? (dealerCode + 'N') : null;
+  const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
+               : (dealerCode ? DEALER_MASTER[dealerCode] : null);
+  const today = new Date();
+  const issueDate = today.getFullYear()+'년 '+(today.getMonth()+1)+'월 '+today.getDate()+'일';
+  const PROD_DISPLAY = { 'MEDIAS': 'MEDIAS T', 'MEDIAS T': 'MEDIAS T', 'JUC': 'JUC SPRAY DRESSING 10ml' };
+
+  const items = (order.items||[]).map(i => {
+    const pd = master ? (master.products[i.product]||{}) : {};
+    const unitPrice = pd.price || i.price || 0;
+    const qty = Math.abs(i.qty||0);
+    const displayName = PROD_DISPLAY[i.product] || i.product;
+    return { product: displayName, qty, unitPrice, amount: qty * unitPrice };
+  });
+  const deliveryAmt = (master?.products && Object.values(master.products).some(p=>p.delivery)) ? 4500 : 0;
+  const total = items.reduce((s,i)=>s+i.amount,0) + deliveryAmt;
+  const supplyAmt = Math.round(total / 1.1);
+  const taxAmt = total - supplyAmt;
+
+  return {
+    dealerRegNo: master?.regNo || '',
+    dealerName:  order.dealerName,
+    dealerCeo:   master?.ceo || '',
+    dealerAddr:  master?.address || '',
+    dealerEmail: master?.email || '',
+    issueDate, items, total, supplyAmt, taxAmt
+  };
+}
+
+function buildTaxDataFromAmtOrder(order, dealer) {
+  const hasDeliveryFee = (order.fee || 0) > 0;
+  const altCode = dealer.code && !hasDeliveryFee ? (dealer.code + 'N') : null;
+  const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
+               : (dealer.code ? DEALER_MASTER[dealer.code] : null);
+  const today = new Date();
+  const issueDate = today.getFullYear()+'년 '+(today.getMonth()+1)+'월 '+today.getDate()+'일';
+  const PROD_DISPLAY = { 'MEDIAS': 'MEDIAS T', 'MEDIAS T': 'MEDIAS T', 'JUC': 'JUC SPRAY DRESSING 10ml' };
+  const pd = master ? (master.products[order.product]||{}) : {};
+  const unitPrice = order.price || pd.price || 0;
+  const qty = Math.abs(order.qty||0);
+  const amount = qty * unitPrice;
+  const deliveryAmt = pd.delivery ? 4500 : 0;
+  const total = amount + deliveryAmt;
+  const supplyAmt = Math.round(total / 1.1);
+  const taxAmt = total - supplyAmt;
+  const displayName = PROD_DISPLAY[order.product] || order.product;
+  const items = [{ product: displayName, qty, unitPrice, amount }];
+
+  return {
+    dealerRegNo: master?.regNo || dealer.regNo || '',
+    dealerName:  dealer.name,
+    dealerCeo:   master?.ceo || '',
+    dealerAddr:  master?.address || dealer.address || '',
+    dealerEmail: master?.email || dealer.email || '',
+    issueDate, items, total, supplyAmt, taxAmt
+  };
+}
+
+</script>
+
 </body>
 </html>
