@@ -6297,19 +6297,162 @@ async function importData(e){
   reader.onload=async(ev)=>{
     try{
       const data=JSON.parse(ev.target.result);
-      if(data.orders) orders=data.orders;
-      if(data.invLogs){ invLogs=data.invLogs; invLogs.forEach(i=>{ if(!i.company) i.company='AMT'; }); }
-      if(data.dealers) dealers=data.dealers;
-      if(data.products) products=data.products;
-      if(data.internalTrades) internalTrades=data.internalTrades;
-      if(data.kyReturns) kyReturns=data.kyReturns;
-      saveLS();
-      toast('가져오기 완료!','success');
-      refreshAll();
+      // ★ 선택적 임포트 모달 표시 (전부 덮어쓰지 않음)
+      _showImportPicker(data);
     }catch(err){ toast('파일 오류: '+err.message,'error'); }
   };
   reader.readAsText(file);
   e.target.value='';
+}
+
+// ★ 선택적 임포트 모달 — 어떤 데이터를 가져올지 사용자가 선택
+function _showImportPicker(data){
+  // 기존 모달 제거
+  const prev = document.getElementById('importPickerModal');
+  if(prev) prev.remove();
+
+  const version = data.version || '?';
+  const exportedAt = data.exportedAt ? new Date(data.exportedAt).toLocaleString('ko-KR') : '알 수 없음';
+
+  // 각 데이터 유형의 건수 집계
+  const counts = {
+    orders: Array.isArray(data.orders) ? data.orders.length : 0,
+    invLogs: Array.isArray(data.invLogs) ? data.invLogs.length : 0,
+    internalTrades: Array.isArray(data.internalTrades) ? data.internalTrades.length : 0,
+    dealers: Array.isArray(data.dealers) ? data.dealers.length : 0,
+    products: Array.isArray(data.products) ? data.products.length : 0,
+    kyReturns: Array.isArray(data.kyReturns) ? data.kyReturns.length : 0,
+    txLogs: Array.isArray(data.txLogs) ? data.txLogs.length : 0,
+    bestReturns: Array.isArray(data.bestReturns) ? data.bestReturns.length : 0
+  };
+
+  // dealers 구조 호환성 체크 (OLD는 email/code 없음)
+  let dealerWarning = '';
+  if(counts.dealers > 0){
+    const missingAuth = data.dealers.filter(d => !d.email || !d.code).length;
+    if(missingAuth > 0){
+      dealerWarning = `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin-top:6px;font-size:.72rem;color:#92400e">
+        ⚠️ ${missingAuth}개 대리점에 이메일/코드가 없습니다 (OLD VERSION). 임포트 시 <b>대리점 로그인이 불가</b>하니, 체크 해제 후 대리점관리 화면에서 새로 등록하시는 것을 권장합니다.
+      </div>`;
+    }
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'importPickerModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+      <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:#f8f9fc">
+        <div>
+          <div style="font-size:1.05rem;font-weight:800">📥 데이터 가져오기 (선택적)</div>
+          <div style="font-size:.72rem;color:var(--text2);margin-top:3px">버전: v${version} · 내보낸 시점: ${exportedAt}</div>
+        </div>
+        <button onclick="document.getElementById('importPickerModal').remove()" style="background:none;border:none;cursor:pointer;font-size:1.2rem">✕</button>
+      </div>
+      <div style="padding:18px 24px">
+        <div style="font-size:.82rem;color:var(--text2);margin-bottom:12px;line-height:1.6">
+          어떤 데이터를 가져올지 선택하세요. <b>체크 해제된 항목은 현재 상태 유지</b>됩니다.<br>
+          <span style="color:var(--red)">※ 체크된 항목은 현재 데이터를 <b>덮어씁니다</b>.</span>
+        </div>
+
+        ${_importCheckbox('orders', '📦 발주내역', counts.orders, true)}
+        ${_importCheckbox('invLogs', '🗃️ 재고이력', counts.invLogs, true)}
+        ${_importCheckbox('internalTrades', '🔄 내부거래', counts.internalTrades, true)}
+        ${_importCheckbox('txLogs', '💰 채권채무 거래', counts.txLogs, true)}
+        ${_importCheckbox('kyReturns', '↩️ KY 반품', counts.kyReturns, true)}
+        ${_importCheckbox('bestReturns', '↩️ BEST 반품', counts.bestReturns, true)}
+        ${_importCheckbox('products', '📋 제품 목록', counts.products, true)}
+        ${_importCheckbox('dealers', '🏢 대리점 정보', counts.dealers, false)}
+        ${dealerWarning}
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#eff6ff;border-radius:8px;margin-bottom:8px">
+          <input type="checkbox" id="impConvertAdjust" checked style="width:auto;margin:0;cursor:pointer">
+          <label for="impConvertAdjust" style="font-size:.78rem;cursor:pointer;flex:1">
+            <b>재고조정 자동 변환</b> <span style="color:var(--text2)">(OLD의 adjust를 신규 delta 모드로)</span>
+          </label>
+        </div>
+        <div style="padding:0 12px;font-size:.7rem;color:var(--text3);line-height:1.5">
+          ※ OLD VERSION의 adjust 이력은 <b>누적식(delta)</b>으로 변환됩니다.<br>
+          &nbsp; 만약 OLD에서 절대값으로 썼다면 체크 해제하세요.
+        </div>
+      </div>
+      <div style="padding:14px 24px;border-top:1px solid var(--border);background:#f8f9fc;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="document.getElementById('importPickerModal').remove()">취소</button>
+        <button class="btn btn-primary" onclick="_executeSelectiveImport()">💾 선택한 데이터 가져오기</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  // window에 data 저장 (onclick에서 안전하게 참조)
+  window._pendingImportData = data;
+}
+
+function _importCheckbox(key, label, count, defaultChecked){
+  const disabled = count === 0;
+  return `<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:${disabled?'not-allowed':'pointer'};background:${disabled?'#f9fafb':'#fff'};opacity:${disabled?0.5:1}">
+    <input type="checkbox" id="imp_${key}" ${defaultChecked&&!disabled?'checked':''} ${disabled?'disabled':''} style="width:18px;height:18px;margin:0;cursor:${disabled?'not-allowed':'pointer'}">
+    <span style="flex:1;font-size:.85rem;font-weight:600">${label}</span>
+    <span style="font-size:.75rem;color:var(--text2);font-family:monospace">${count}건</span>
+  </label>`;
+}
+
+async function _executeSelectiveImport(){
+  // JSON.stringify로 넘긴 data는 에스케이프 이슈가 있으니 window에서 읽음
+  const data = window._pendingImportData;
+  if(!data){ toast('임포트 데이터 누락','error'); return; }
+
+  const selected = {};
+  ['orders','invLogs','internalTrades','txLogs','kyReturns','bestReturns','products','dealers'].forEach(k => {
+    const cb = document.getElementById('imp_'+k);
+    selected[k] = cb && cb.checked;
+  });
+
+  const convertAdjust = document.getElementById('impConvertAdjust')?.checked;
+
+  // 선택 확인
+  const selectedList = Object.entries(selected).filter(([k,v])=>v).map(([k])=>k);
+  if(selectedList.length === 0){ toast('최소 1개 이상 선택하세요','error'); return; }
+  if(!confirm(`다음 ${selectedList.length}개 항목을 가져옵니다:\n\n${selectedList.join(', ')}\n\n선택 안 한 항목은 현재 상태가 유지됩니다. 계속하시겠습니까?`)) return;
+
+  try{
+    // 실제 적용
+    if(selected.orders && Array.isArray(data.orders)) orders = data.orders;
+    if(selected.invLogs && Array.isArray(data.invLogs)){
+      invLogs = data.invLogs;
+      invLogs.forEach(i => {
+        if(!i.company) i.company = 'AMT';
+        // ★ OLD adjust → 신규 delta 모드 변환 (옵션)
+        if(convertAdjust && i.type === 'adjust' && !i.adjustMode){
+          i.adjustMode = 'delta';
+        }
+      });
+    }
+    if(selected.internalTrades && Array.isArray(data.internalTrades)) internalTrades = data.internalTrades;
+    if(selected.txLogs && Array.isArray(data.txLogs)) txLogs = data.txLogs;
+    if(selected.kyReturns && Array.isArray(data.kyReturns)) kyReturns = data.kyReturns;
+    if(selected.bestReturns && Array.isArray(data.bestReturns)) bestReturns = data.bestReturns;
+    if(selected.products && Array.isArray(data.products)) products = data.products;
+    if(selected.dealers && Array.isArray(data.dealers)) dealers = data.dealers;
+
+    saveLS();
+    if(window._fb && window._fb.ready){
+      await fbSaveAll();
+    }
+
+    addAuditLog('edit','데이터',`JSON 가져오기: ${selectedList.join(', ')}${convertAdjust?' (adjust→delta 변환)':''}`);
+
+    // 정리
+    delete window._pendingImportData;
+    document.getElementById('importPickerModal').remove();
+
+    toast(`✅ ${selectedList.length}개 항목 가져오기 완료`,'success');
+    refreshAll();
+  }catch(err){
+    toast('❌ 가져오기 실패: '+err.message,'error');
+    console.error(err);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════
