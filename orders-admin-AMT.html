@@ -890,6 +890,7 @@ async function sendStatementOnAmtOrder(order, dealer) {
   </div>
   <div class="header-right">
     <span class="admin-name-chip" id="amtAdminBadge" onclick="amtAdminLogout()" title="클릭하면 로그아웃됩니다" style="cursor:pointer">👤 ─</span>
+    <button id="roleSwitchBtn" onclick="openRoleSwitchMenu()" title="역할 전환 (총괄관리자 전용)" style="display:none;background:#f0f9ff;border:1px solid #7dd3fc;color:#0369a1;padding:4px 10px;border-radius:12px;font-size:.72rem;font-weight:700;margin-left:4px;cursor:pointer">🔄 역할전환</button>
     <span id="amtNotifChip" onclick="toggleNotifPanel()" title="전체 알림 보기" style="display:none;cursor:pointer;background:#ef4444;color:#fff;padding:3px 10px;border-radius:12px;font-size:.75rem;font-weight:700;margin-left:4px">🔔 0</span>
     <div class="sync-badge">
       <div class="sync-dot off pulse" id="syncDot"></div>
@@ -8052,11 +8053,130 @@ function calcImportVat(startYm, endYm){
 const SUPER_ADMIN_EMAIL = 'kyunghoyou@gmail.com';
 let _otpPending = null;
 
-function isSuperAdmin(){
+// ★ 역할 전환(임시 가장): sessionStorage 'amt_impersonate_role' 이 'admin' 이면
+//    총괄관리자가 일반관리자 뷰로 전환한 상태 → isSuperAdmin()은 false 반환
+//    원래 이메일이 SUPER_ADMIN_EMAIL 인 경우에만 적용됨 (보안)
+function _isRealSuperAdmin(){
   try{
     const sess = JSON.parse(sessionStorage.getItem('amt_auth_session')||'{}');
     return sess.role === 'super' || sess.email === SUPER_ADMIN_EMAIL;
   }catch(e){ return false; }
+}
+function isImpersonatingAdmin(){
+  try{
+    if(!_isRealSuperAdmin()) return false; // 실 총괄만 전환 가능
+    return sessionStorage.getItem('amt_impersonate_role') === 'admin';
+  }catch(e){ return false; }
+}
+function isSuperAdmin(){
+  if(isImpersonatingAdmin()) return false; // ★ 가장 중일 때는 일반관리자 취급
+  return _isRealSuperAdmin();
+}
+
+/* ═══════════════════════════════════════════════════════
+   역할 전환 UI (총괄관리자 전용)
+   - "일반관리자 뷰 체험": sessionStorage에 amt_impersonate_role='admin' 설정
+   - "대리점 뷰 체험": 새 탭에서 orders-KY.html?impersonate=<email>&from=super 열기
+═══════════════════════════════════════════════════════ */
+function initRoleSwitchUI(){
+  const btn = document.getElementById('roleSwitchBtn');
+  if(!btn) return;
+  if(!_isRealSuperAdmin()){ btn.style.display='none'; return; }
+  btn.style.display='inline-block';
+
+  // 가장 중이면 배너 표시
+  if(isImpersonatingAdmin()){
+    showImpersonationBanner();
+    btn.textContent = '🔙 원래 역할로 복귀';
+    btn.style.background = '#fef3c7';
+    btn.style.borderColor = '#fbbf24';
+    btn.style.color = '#92400e';
+    btn.onclick = exitImpersonation;
+  }
+}
+
+function showImpersonationBanner(){
+  if(document.getElementById('impersonationBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'impersonationBanner';
+  banner.style.cssText = 'position:sticky;top:0;z-index:9998;background:linear-gradient(90deg,#fbbf24,#f59e0b);color:#422006;padding:8px 14px;text-align:center;font-size:.82rem;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.1);display:flex;justify-content:center;align-items:center;gap:12px';
+  banner.innerHTML = '⚠️ <span>일반관리자 뷰 체험 중 — 실제 역할은 총괄관리자입니다</span> <button onclick="exitImpersonation()" style="background:#422006;color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:.75rem;font-weight:700;cursor:pointer">🔙 복귀</button>';
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+
+function openRoleSwitchMenu(){
+  if(!_isRealSuperAdmin()){ toast('총괄관리자 전용 기능입니다','error'); return; }
+
+  // 기존 메뉴 있으면 닫기
+  const existing = document.getElementById('roleSwitchMenu');
+  if(existing){ existing.remove(); return; }
+
+  // 대리점 목록 (선택용)
+  const dealerList = (window.dealers || []).filter(d => d.email).sort((a,b)=>a.name.localeCompare(b.name));
+
+  const menu = document.createElement('div');
+  menu.id = 'roleSwitchMenu';
+  menu.style.cssText = 'position:fixed;top:64px;right:16px;width:320px;max-width:92vw;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;padding:8px;max-height:70vh;overflow-y:auto';
+  menu.innerHTML = `
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-weight:700;font-size:.9rem;display:flex;justify-content:space-between;align-items:center">
+      <span>🔄 역할 전환</span>
+      <button onclick="document.getElementById('roleSwitchMenu').remove()" style="background:none;border:none;cursor:pointer;font-size:1rem">✕</button>
+    </div>
+    <div style="padding:10px 12px 6px;font-size:.72rem;color:var(--text2);font-weight:600">관리자 뷰</div>
+    <button onclick="enterImpersonationAdmin()" style="width:100%;text-align:left;padding:10px 12px;border:none;background:#f0f9ff;border-radius:8px;cursor:pointer;margin-bottom:6px;font-size:.82rem">
+      👨‍💼 <b>일반관리자 뷰로 전환</b><div style="font-size:.7rem;color:var(--text2);margin-top:3px">OTP 요청/승인 포함 모든 일반관리자 화면 확인</div>
+    </button>
+    <div style="padding:10px 12px 6px;font-size:.72rem;color:var(--text2);font-weight:600;border-top:1px solid var(--border);margin-top:6px">대리점 뷰 (새 탭)</div>
+    ${dealerList.length === 0 ? '<div style="padding:10px 12px;font-size:.75rem;color:#999">등록된 대리점이 없습니다</div>' :
+      dealerList.map(d => `
+        <button onclick="impersonateDealer('${encodeURIComponent(d.email)}','${(d.name||'').replace(/'/g,"\\'")}')" style="width:100%;text-align:left;padding:9px 12px;border:none;background:#fff;border-radius:6px;cursor:pointer;font-size:.8rem;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
+          <span>🏢 ${d.name}</span>
+          <span style="font-size:.68rem;color:#999;font-family:monospace">${d.email}</span>
+        </button>
+      `).join('')
+    }
+    <div style="padding:10px 12px;border-top:1px solid var(--border);margin-top:6px;font-size:.7rem;color:#999;line-height:1.5">
+      💡 대리점 뷰는 새 탭에서 열리며, 해당 대리점의 실제 세션을 방해하지 않습니다.
+    </div>
+  `;
+  document.body.appendChild(menu);
+
+  // 바깥 클릭 시 닫기
+  setTimeout(()=>{
+    const closer = (e) => {
+      if(!menu.contains(e.target) && e.target.id !== 'roleSwitchBtn'){
+        menu.remove();
+        document.removeEventListener('click', closer);
+      }
+    };
+    document.addEventListener('click', closer);
+  }, 10);
+}
+
+function enterImpersonationAdmin(){
+  if(!_isRealSuperAdmin()){ toast('총괄관리자 전용 기능입니다','error'); return; }
+  if(!confirm('일반관리자 뷰로 전환하시겠습니까?\n\n• 모든 총괄관리자 권한이 일시적으로 숨겨집니다\n• 삭제/수정 시 OTP 요청 플로우를 직접 확인할 수 있습니다\n• 언제든 "복귀" 버튼으로 원래 역할로 돌아갈 수 있습니다')) return;
+  sessionStorage.setItem('amt_impersonate_role', 'admin');
+  toast('🔄 일반관리자 뷰로 전환합니다...', 'info');
+  setTimeout(()=>location.reload(), 400);
+}
+
+function exitImpersonation(){
+  sessionStorage.removeItem('amt_impersonate_role');
+  toast('🔙 총괄관리자로 복귀합니다...', 'success');
+  setTimeout(()=>location.reload(), 400);
+}
+
+function impersonateDealer(emailEncoded, dealerName){
+  if(!_isRealSuperAdmin()){ toast('총괄관리자 전용 기능입니다','error'); return; }
+  const email = decodeURIComponent(emailEncoded);
+  if(!confirm(`"${dealerName}" 대리점 뷰로 새 탭을 여시겠습니까?\n\n• 읽기 전용 가장 모드로 접속됩니다\n• 기본으로 주문 저장이 차단됩니다 (미리보기 전용)\n• 원 대리점의 실제 로그인 세션과 분리됩니다`)) return;
+
+  // 새 탭에서 열기 - orders-KY.html이 쿼리 파라미터 감지
+  const url = 'orders-KY.html?impersonate=' + encodeURIComponent(email) + '&from=super&ts=' + Date.now();
+  window.open(url, '_blank', 'noopener');
+  const menu = document.getElementById('roleSwitchMenu');
+  if(menu) menu.remove();
 }
 
 // OTP 요청: 총관리자가 아닌 경우 OTP 필요
@@ -8690,6 +8810,7 @@ function getAuthSession(){
 function amtAdminLogout(){
   if(!confirm('로그아웃 하시겠습니까?')) return;
   sessionStorage.removeItem('amt_auth_session');
+  sessionStorage.removeItem('amt_impersonate_role'); // ★ 가장 플래그도 정리
   location.replace('index-AMT.html');
 }
 
@@ -8707,6 +8828,9 @@ window.addEventListener('DOMContentLoaded',()=>{
                        : sess.email === 'amedtech@gmail.com'   ? '강승섭' : sess.email;
   const badge = document.getElementById('amtAdminBadge');
   if(badge) badge.textContent = '👤 ' + window._amtAdminName;
+
+  // ★ 역할 전환 UI 초기화 (실 총괄만 노출)
+  try{ initRoleSwitchUI(); }catch(e){ console.warn('역할전환 UI 초기화 실패:', e); }
 
   // 텔레그램 설정 로드 & 초기화
   setTimeout(() => {
