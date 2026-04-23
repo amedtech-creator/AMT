@@ -679,6 +679,7 @@ const KY_SUPPLIER = {
 };
 
 // ── 대리점 코드 찾기 (dealers 배열 또는 DEALER_MASTER) ────────
+// ★ 이 함수는 레거시 호환용 - 새 코드는 getDealerInfo() 사용 권장
 function _getDealerMaster(dealerIdOrCode, dealerName) {
   // 1) dealers 배열에서 code로 직접 매칭
   if(typeof dealers !== 'undefined') {
@@ -688,9 +689,83 @@ function _getDealerMaster(dealerIdOrCode, dealerName) {
   }
   // 2) 코드 직접 매칭
   if(DEALER_MASTER[dealerIdOrCode]) return { ...DEALER_MASTER[dealerIdOrCode], name: dealerName||dealerIdOrCode };
-  // 3) 이름으로 매칭 시도
-  const found = Object.entries(DEALER_MASTER).find(([,v]) => dealerName && v.address && dealerName.includes && dealerName.length > 0);
-  return found ? { ...found[1], name: dealerName } : null;
+  // 3) 매칭 실패 시 null 반환 (예전에 잘못된 폴백이 있었으나 제거)
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★★★ 통합 대리점 정보 조회 (dealers 배열 우선, DEALER_MASTER 폴백)
+// 명세서/세금계산서용 정보를 반환
+// 반환 구조: {
+//   name, regNo, ceo, email, address,
+//   products: { [productName]: {catNo, price, delivery, deliveryFee} }
+// }
+// ═══════════════════════════════════════════════════════════════
+function getDealerInfo(dealerOrIdOrCode, dealerNameFallback, options) {
+  options = options || {};
+  const includeDeliveryFee = !!options.includeDeliveryFee; // 택배비 포함 여부 (거래명세서 생성 시 주입)
+
+  // 인자가 객체(dealer)이면 바로 사용, 아니면 dealers에서 찾기
+  let d = null;
+  if(dealerOrIdOrCode && typeof dealerOrIdOrCode === 'object'){
+    d = dealerOrIdOrCode;
+  } else if(typeof dealers !== 'undefined') {
+    d = dealers.find(x =>
+      x.id === dealerOrIdOrCode ||
+      x.code === dealerOrIdOrCode ||
+      x.name === dealerNameFallback
+    );
+  }
+
+  // DEALER_MASTER 폴백
+  const code = (d && d.code) || dealerOrIdOrCode;
+  const masterByCode = (code && typeof DEALER_MASTER !== 'undefined') ? DEALER_MASTER[code] : null;
+
+  // 택배비 버전 분기 (008382N, 005720N 등)
+  let master = masterByCode;
+  if(code && !includeDeliveryFee && typeof DEALER_MASTER !== 'undefined' && DEALER_MASTER[code + 'N']){
+    master = DEALER_MASTER[code + 'N'];
+  }
+
+  // 제품 맵 조립 (dealers.products 우선)
+  const productsMap = {};
+  if(d && Array.isArray(d.products)){
+    d.products.forEach(p => {
+      const masterProd = master?.products?.[p.product] || {};
+      productsMap[p.product] = {
+        catNo: p.catNo || masterProd.catNo || '',
+        price: p.price || masterProd.price || 0,
+        delivery: includeDeliveryFee && (d.fee||0) > 0,
+        deliveryFee: (d.fee||0)
+      };
+    });
+  } else if(master?.products){
+    Object.keys(master.products).forEach(k => {
+      const m = master.products[k];
+      productsMap[k] = {
+        catNo: m.catNo || '',
+        price: m.price || 0,
+        delivery: !!m.delivery,
+        deliveryFee: m.deliveryFee || 0
+      };
+    });
+  }
+
+  // 주소 정규화: dealers에 저장된 평문 주소 우선, 없으면 master의 <br> 포함 주소
+  const addressRaw = (d && d.address) || master?.address || '';
+
+  return {
+    name: (d && d.name) || master?.name || dealerNameFallback || '',
+    regNo: (d && d.regNo) || master?.regNo || '',
+    ceo: (d && d.ceo) || master?.ceo || '',
+    email: (d && d.email) || master?.email || '',
+    address: addressRaw,
+    products: productsMap,
+    // 원본 참조
+    _source: d ? 'dealers' : (master ? 'DEALER_MASTER' : 'none'),
+    _code: code,
+    _fee: d ? (d.fee||0) : (master?.products ? Object.values(master.products).find(p=>p.deliveryFee)?.deliveryFee||0 : 0)
+  };
 }
 
 // ── 거래명세서 HTML 생성 ─────────────────────────────────────
@@ -865,36 +940,37 @@ async function sendStatementEmail(dealerName, dealerEmail, orderId, statementHTM
 }
 
 // ── [경로1] KY주문 출고 시 발송 ─────────────────────────────
-async function sendStatementOnKyShip(order) {
+// includeDeliveryFee: 택배비 포함 명세서 발송 여부 (관리자가 출고 시 선택)
+//                     null/undefined면 order.fee>0 기준으로 자동 판단 (기존 동작)
+async function sendStatementOnKyShip(order, includeDeliveryFee) {
   try {
-    // dealers 배열에서 code 찾기
-    let dealerCode = null;
-    if(typeof dealers !== 'undefined') {
-      const d = dealers.find(x => x.id === order.dealerId || x.name === order.dealerName);
-      if(d) dealerCode = d.code;
+    const hasFeeAuto = (order.fee || 0) > 0;
+    const includeFee = (includeDeliveryFee === undefined || includeDeliveryFee === null)
+      ? hasFeeAuto
+      : !!includeDeliveryFee;
+
+    const info = getDealerInfo(order.dealerId, order.dealerName, { includeDeliveryFee: includeFee });
+    if(!info || !info.email){
+      console.warn('거래명세서: 대리점 정보/이메일 없음 →', order.dealerName);
+      toast('⚠️ '+order.dealerName+' 정보 없음 - 명세서 미발송','error');
+      return;
     }
-    // 택배비 유무: 발주에 fee>0이면 택배비 있는 버전 사용, 없으면 N버전 우선
-    const hasDeliveryFee = (order.fee || 0) > 0;
-    // 택배비 없는 버전 코드 (008382N, 005720N)
-    const altCode = dealerCode && !hasDeliveryFee ? (dealerCode + 'N') : null;
-    const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
-                 : (dealerCode ? DEALER_MASTER[dealerCode] : null);
-    if(!master) { console.warn('거래명세서: 대리점 마스터 없음 →', order.dealerName); return; }
 
     const items = (order.items||[]).map(i => {
-      const pd = master.products[i.product] || {};
+      const pd = info.products[i.product] || {};
       return {
         product:   i.product,
         catNo:     pd.catNo || '',
         qty:       Math.abs(i.qty),
         unitPrice: pd.price || i.price || 0,
-        delivery:  pd.delivery || false
+        delivery:  includeFee && (pd.delivery || hasFeeAuto),
+        deliveryFee: includeFee ? (pd.deliveryFee || info._fee || 0) : 0
       };
     });
 
-    const html = buildStatementHTML(items, order.dealerName, master, order.id);
-    await sendStatementEmail(order.dealerName, master.email, order.id, html);
-    console.log('✅ 거래명세서 발송 완료 →', master.email);
+    const html = buildStatementHTML(items, order.dealerName, info, order.id);
+    await sendStatementEmail(order.dealerName, info.email, order.id, html);
+    console.log('✅ 거래명세서 발송 완료 →', info.email, '(택배비 포함:', includeFee, ')');
   } catch(e) {
     console.error('거래명세서 발송 실패:', e);
     toast('⚠️ 출고 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -902,28 +978,33 @@ async function sendStatementOnKyShip(order) {
 }
 
 // ── [경로2] AMT 발주저장 시 발송 ────────────────────────────
-async function sendStatementOnAmtOrder(order, dealer) {
+async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
   try {
-    let dealerCode = dealer.code || null;
-    // 택배비 유무: 발주에 fee>0이면 택배비 있는 버전, 없으면 N버전 우선
-    const hasDeliveryFee = (order.fee || 0) > 0;
-    const altCode = dealerCode && !hasDeliveryFee ? (dealerCode + 'N') : null;
-    const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
-                 : (dealerCode ? DEALER_MASTER[dealerCode] : null);
-    if(!master) { console.warn('거래명세서: 대리점 마스터 없음 →', dealer.name); return; }
+    const hasFeeAuto = (order.fee || 0) > 0;
+    const includeFee = (includeDeliveryFee === undefined || includeDeliveryFee === null)
+      ? hasFeeAuto
+      : !!includeDeliveryFee;
 
-    const pd = master.products[order.product] || {};
+    const info = getDealerInfo(dealer, dealer.name, { includeDeliveryFee: includeFee });
+    if(!info || !info.email){
+      console.warn('거래명세서: 대리점 정보/이메일 없음 →', dealer.name);
+      toast('⚠️ '+dealer.name+' 정보 없음 - 명세서 미발송','error');
+      return;
+    }
+
+    const pd = info.products[order.product] || {};
     const items = [{
       product:   order.product,
       catNo:     pd.catNo || '',
       qty:       Math.abs(order.qty),
       unitPrice: order.price || pd.price || 0,
-      delivery:  pd.delivery || false
+      delivery:  includeFee && (pd.delivery || hasFeeAuto),
+      deliveryFee: includeFee ? (pd.deliveryFee || info._fee || 0) : 0
     }];
 
-    const html = buildStatementHTML(items, dealer.name, master, order.id);
-    await sendStatementEmail(dealer.name, master.email, order.id, html);
-    console.log('✅ 거래명세서 발송 완료 →', master.email);
+    const html = buildStatementHTML(items, dealer.name, info, order.id);
+    await sendStatementEmail(dealer.name, info.email, order.id, html);
+    console.log('✅ 거래명세서 발송 완료 →', info.email, '(택배비 포함:', includeFee, ')');
   } catch(e) {
     console.error('거래명세서 발송 실패:', e);
     toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -1059,6 +1140,13 @@ async function sendStatementOnAmtOrder(order, dealer) {
       <div class="form-group" id="oFeeGroup" style="display:none">
         <label>택배비 (별도)</label>
         <input type="number" id="oFee" value="4500">
+      </div>
+      <div class="form-group" id="oFeeIncludeGroup" style="display:none">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding-top:22px">
+          <input type="checkbox" id="oFeeInclude" checked style="width:auto;margin:0">
+          <span style="font-size:.82rem">택배비 포함 명세서</span>
+        </label>
+        <span style="font-size:.7rem;color:var(--text3);margin-top:3px;display:block">체크 시 택배비 포함 명세서 발송</span>
       </div>
       <div class="form-group">
         <label>메모</label>
@@ -1756,6 +1844,20 @@ async function sendStatementOnAmtOrder(order, dealer) {
       <div id="gasEmailStatus" style="margin-top:10px;font-size:.78rem"></div>
     </div>
     <hr class="divider">
+    <div class="setting-section" id="dealerMigrateSection" style="display:none">
+      <h3>🔄 대리점 정보 일괄 가져오기 (1회성)</h3>
+      <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
+        기존 하드코딩된 DEALER_MASTER(사업자번호/대표자/주소/Cat-No)를 <b>대리점 목록</b>에 일괄 반영합니다.<br>
+        이미 입력된 필드는 덮어쓰지 않습니다 (빈 값만 채움).<br>
+        <span style="color:var(--red)">※ 총괄관리자 전용, 1회만 실행하면 됨</span>
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="migrateDealerMaster(true)">🔍 미리보기 (저장 안 함)</button>
+        <button class="btn btn-success btn-sm" onclick="migrateDealerMaster(false)">💾 실행 & 저장</button>
+      </div>
+      <div id="dealerMigrateResult" style="margin-top:10px;font-size:.78rem;max-height:300px;overflow-y:auto"></div>
+    </div>
+    <hr class="divider">
     <div class="setting-section">
       <h3>📦 데이터 관리</h3>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1991,7 +2093,7 @@ async function sendStatementOnAmtOrder(order, dealer) {
     </div>
     <div class="form-grid">
       <div class="form-group">
-        <label>택배비 별도 (원)</label>
+        <label>택배비 별도 (원) <span style="font-size:.7rem;color:var(--text3);font-weight:400">(0이면 택배비 없음)</span></label>
         <input type="number" id="dmFee" placeholder="없으면 0" value="0">
       </div>
       <div class="form-group" style="flex:2">
@@ -2001,7 +2103,26 @@ async function sendStatementOnAmtOrder(order, dealer) {
     </div>
 
     <hr class="divider">
-    <div style="font-size:.78rem;font-weight:700;color:var(--text2);margin-bottom:10px">📦 취급 제품</div>
+    <div style="font-size:.78rem;font-weight:700;color:var(--text2);margin-bottom:10px">📄 거래명세서 / 세금계산서용 정보 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(이메일 발송 시 명세서에 표시됨)</span></div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>사업자등록번호</label>
+        <input type="text" id="dmRegNo" placeholder="000-00-00000" maxlength="13">
+      </div>
+      <div class="form-group">
+        <label>대표자명</label>
+        <input type="text" id="dmCeo" placeholder="홍길동">
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group" style="flex:1;min-width:100%">
+        <label>사업장 주소</label>
+        <input type="text" id="dmAddress" placeholder="서울시 ...">
+      </div>
+    </div>
+
+    <hr class="divider">
+    <div style="font-size:.78rem;font-weight:700;color:var(--text2);margin-bottom:10px">📦 취급 제품 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(카탈로그 번호는 세금계산서용)</span></div>
     <div id="dmProducts"><!-- 동적 --></div>
     <button class="btn btn-outline btn-sm" onclick="addDmProduct()" style="margin-top:8px">+ 제품 추가</button>
 
@@ -2646,6 +2767,7 @@ function populateSelects(){
     if(d){
       d.products.forEach(p=>{ const o=document.createElement('option'); o.value=p.product; o.textContent=p.product; if(p.product===curProd) o.selected=true; pEl.appendChild(o); });
       document.getElementById('oFeeGroup').style.display=d.fee>0?'block':'none';
+      document.getElementById('oFeeIncludeGroup').style.display=d.fee>0?'block':'none';
       document.getElementById('oFee').value=d.fee||0;
       // 제품도 선택돼 있으면 단가 자동 갱신
       if(curProd && d.products.find(p=>p.product===curProd)){
@@ -2696,6 +2818,7 @@ function oOnDealer(){
   if(!d) return;
   d.products.forEach(p=>{ const o=document.createElement('option'); o.value=p.product; o.textContent=p.product; pEl.appendChild(o); });
   document.getElementById('oFeeGroup').style.display=d.fee>0?'block':'none';
+  document.getElementById('oFeeIncludeGroup').style.display=d.fee>0?'block':'none';
   document.getElementById('oFee').value=d.fee||0;
   oOnProduct();
 }
@@ -2823,10 +2946,16 @@ async function _doSaveOrder(){
   }
 
   // ★ 거래명세서 자동 이메일 발송 (발주저장 시)
-  sendStatementOnAmtOrder(order, dealer).catch(()=>{});
+  // 택배비 포함 여부: 체크박스 값 사용 (대리점에 fee가 있을 때만 체크박스 노출됨)
+  const feeIncludeEl = document.getElementById('oFeeInclude');
+  const feeIncludeGroup = document.getElementById('oFeeIncludeGroup');
+  const includeDeliveryFee = (feeIncludeGroup && feeIncludeGroup.style.display !== 'none')
+    ? (feeIncludeEl ? feeIncludeEl.checked : false)
+    : undefined; // 체크박스 숨김이면 자동 판단
+  sendStatementOnAmtOrder(order, dealer, includeDeliveryFee).catch(()=>{});
 
   // ★ 전자세금계산서 반자동 — 데이터 팝업
-  try { openTaxModal(buildTaxDataFromAmtOrder(order, dealer)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
+  try { openTaxModal(buildTaxDataFromAmtOrder(order, dealer, includeDeliveryFee)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
 
   toast(`발주 저장 완료 ✓ 수금예정: ${dueDate}`,'success');
   document.getElementById('oMsg').textContent=`저장됨 · 수금예정 ${dueDate}`;
@@ -4791,6 +4920,9 @@ function openDealerModal(id=null){
   document.getElementById('dmCustomDay').value='';
   document.getElementById('dmFee').value='0';
   document.getElementById('dmNote').value='';
+  document.getElementById('dmRegNo').value='';
+  document.getElementById('dmCeo').value='';
+  document.getElementById('dmAddress').value='';
   document.getElementById('dmProducts').innerHTML='';
 
   if(id){
@@ -4811,7 +4943,18 @@ function openDealerModal(id=null){
       }
       document.getElementById('dmFee').value=d.fee||0;
       document.getElementById('dmNote').value=d.note||'';
-      d.products.forEach(p=>addDmProduct(p.product,p.price,p.priceOld,p.priceOldUntil));
+      // ★ 신규: 사업자 정보 로드 (없으면 DEALER_MASTER에서 폴백)
+      const fallback = (typeof DEALER_MASTER !== 'undefined' && d.code) ? DEALER_MASTER[d.code] : null;
+      document.getElementById('dmRegNo').value = d.regNo || (fallback?.regNo||'');
+      document.getElementById('dmCeo').value = d.ceo || (fallback?.ceo||'');
+      // address는 DEALER_MASTER에서 <br>을 쓰므로 평문으로 변환
+      const addrRaw = d.address || (fallback?.address||'');
+      document.getElementById('dmAddress').value = addrRaw.replace(/<br\s*\/?>/gi,', ').replace(/\s+/g,' ').trim();
+      // 제품 로드 - catNo도 함께
+      d.products.forEach(p => {
+        const fallbackCatNo = fallback?.products?.[p.product]?.catNo || '';
+        addDmProduct(p.product, p.price, p.priceOld, p.priceOldUntil, p.catNo || fallbackCatNo);
+      });
     }
   } else {
     addDmProduct();
@@ -4828,7 +4971,7 @@ function toggleDmCustomDate(){
 
 function closeDealerModal(){ document.getElementById('dealerModal').classList.remove('open'); }
 
-function addDmProduct(prod='',price='',priceOld='',priceOldUntil=''){
+function addDmProduct(prod='',price='',priceOld='',priceOldUntil='',catNo=''){
   const wrap=document.getElementById('dmProducts');
   const row=document.createElement('div');
   row.className='form-grid';
@@ -4838,6 +4981,10 @@ function addDmProduct(prod='',price='',priceOld='',priceOldUntil=''){
       <label>제품명</label>
       <input class="dp-prod" type="text" value="${prod}" placeholder="JUC / MEDIAS / DELL" list="prodlist">
       <datalist id="prodlist">${products.map(p=>`<option value="${p}">`).join('')}</datalist>
+    </div>
+    <div class="form-group">
+      <label>Cat-No <span style="font-size:.65rem;color:var(--text3);font-weight:400">(세금계산서용)</span></label>
+      <input class="dp-catno" type="text" value="${catNo||''}" placeholder="예: BM5001VB">
     </div>
     <div class="form-group">
       <label>단가 (현재)</label>
@@ -4989,6 +5136,10 @@ async function _doSaveDealer(){
   }
   const fee=parseInt(document.getElementById('dmFee').value)||0;
   const note=document.getElementById('dmNote').value.trim();
+  // ★ 신규 - 사업자 정보
+  const regNo = document.getElementById('dmRegNo').value.trim();
+  const ceo = document.getElementById('dmCeo').value.trim();
+  const address = document.getElementById('dmAddress').value.trim();
 
   if(!name){ toast('대리점명을 입력하세요','error'); return; }
   if(!email){ toast('이메일을 입력하세요 (KY 주문 로그인용)','error'); return; }
@@ -5002,9 +5153,11 @@ async function _doSaveDealer(){
     const price=parseInput(row.querySelector('.dp-price'));
     const pOld=parseInput(row.querySelector('.dp-pold'));
     const until=row.querySelector('.dp-until').value;
+    const catNo=(row.querySelector('.dp-catno')?.value||'').trim(); // ★ 신규
     if(p&&price>0){
       const item={product:p,price};
       if(pOld>0){ item.priceOld=pOld; item.priceOldUntil=until; }
+      if(catNo) item.catNo = catNo; // ★ 신규
       prods.push(item);
     }
   });
@@ -5019,7 +5172,7 @@ async function _doSaveDealer(){
     addAuditLog('edit','대리점',`수정: ${d.name} → ${name} (이메일: ${email})`);
     const finalCode = code || d.code || '';
     const oldEmail = d.email;
-    Object.assign(d,{name,email,code:finalCode,term,fee,note,products:prods});
+    Object.assign(d,{name,email,code:finalCode,term,fee,note,products:prods,regNo,ceo,address});
     d._v = Date.now(); // ★ Fix: 병합 시 이 변경이 최신임을 보장
     await fbSaveDoc('dealers',d.id,d);
     // ★ 이메일이 바뀌었거나 새 이메일이면 Auth 계정 생성 (더미PW)
@@ -5033,7 +5186,7 @@ async function _doSaveDealer(){
       toast('✅ 코드 변경됨 - 즉시 다음 로그인부터 적용','info');
     }
   } else {
-    const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods,_v:Date.now()};
+    const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods,regNo,ceo,address,_v:Date.now()};
     dealers.push(d);
     addAuditLog('create','대리점',`추가: ${name} (이메일: ${email})`);
     await fbSaveDoc('dealers',d.id,d);
@@ -7381,9 +7534,32 @@ function kyOpenAction(orderId, targetStatus){
     ${rows}
     ${o.memo?`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.82rem"><span>메모</span><span>${o.memo}</span></div>`:''}
     <div style="display:flex;justify-content:space-between;padding:10px 0 0;font-weight:800;font-size:.88rem"><span>합계</span><span style="color:var(--yellow)">${fmt(o.total)}원</span></div>`;
+  // ★ 택배비 선택 UI (shipped 상태이고 해당 대리점에 fee 설정이 있는 경우)
+  let feeSelectHtml = '';
+  if(targetStatus === 'shipped' && !isReturn && !isExchange){
+    const dealerForFee = dealers.find(x => x.id === o.dealerId || x.name === o.dealerName);
+    const dealerFee = dealerForFee ? (dealerForFee.fee||0) : 0;
+    const orderHasFee = (o.fee||0) > 0;
+    if(dealerFee > 0 || orderHasFee){
+      // 기본값: 대리점이 주문할 때 fee를 넣었으면 체크, 아니면 체크 안 함
+      const defaultChecked = orderHasFee ? 'checked' : '';
+      feeSelectHtml = `
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.85rem;font-weight:600;color:#92400e">
+            <input type="checkbox" id="kyShipFeeInclude" ${defaultChecked} style="width:18px;height:18px;cursor:pointer">
+            <span>🚚 택배비 포함 명세서 발송</span>
+          </label>
+          <div style="font-size:.7rem;color:#78350f;margin-top:4px;padding-left:26px">
+            체크 해제 시 택배비 없는 명세서가 발송됩니다 (대리점 ${o.dealerName}: 택배비 ${fmt(dealerFee||(o.fee||0))}원)
+          </div>
+        </div>`;
+    }
+  }
+
   document.getElementById('kyActionArea').innerHTML = `
     <div style="font-weight:700;margin-bottom:8px;color:${colors[targetStatus]||'var(--text)'}">→ ${labels[targetStatus]||targetStatus}</div>
     ${actionNote}
+    ${feeSelectHtml}
     <textarea id="kyActionNote" placeholder="대리점에 전달할 메모 (선택)..." style="width:100%;background:var(--gray-light);border:1.5px solid var(--border);border-radius:6px;padding:10px;font-family:inherit;font-size:.85rem;min-height:70px;resize:vertical;outline:none;margin-bottom:8px">${o.statusNote||''}</textarea>
     <div style="display:flex;gap:8px">
       <button class="btn btn-ghost" style="flex:1" onclick="kyCloseDetail()">취소</button>
@@ -7437,9 +7613,12 @@ async function kyConfirmAction(orderId, targetStatus){
 
     // ★ 거래명세서 자동 이메일 발송 (일반 출고 시만)
     if(targetStatus === 'shipped' && o.orderType !== 'return' && o.orderType !== 'exchange'){
-      sendStatementOnKyShip(o).catch(()=>{});
+      // 체크박스가 있으면 그 값 사용, 없으면 자동 판단 (undefined)
+      const feeCbxEl = document.getElementById('kyShipFeeInclude');
+      const includeDeliveryFee = feeCbxEl ? feeCbxEl.checked : undefined;
+      sendStatementOnKyShip(o, includeDeliveryFee).catch(()=>{});
       // ★ 전자세금계산서 반자동 — 데이터 팝업
-      try { openTaxModal(buildTaxDataFromKyOrder(o)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
+      try { openTaxModal(buildTaxDataFromKyOrder(o, includeDeliveryFee)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
     }
 
     toast('✅ '+o.dealerName+' → '+(lbl[targetStatus]||targetStatus),'success');
@@ -8292,6 +8471,10 @@ async function initGasEmailSettings(){
   if(!_isRealSuperAdmin()){ section.style.display='none'; return; }
   section.style.display='block';
 
+  // ★ 대리점 마이그레이션 섹션도 총괄에게만 노출
+  const migSection = document.getElementById('dealerMigrateSection');
+  if(migSection) migSection.style.display = 'block';
+
   // 현재 저장된 URL 로드 (Firebase 우선 → 없으면 localStorage)
   let savedUrl = '';
   try{
@@ -8366,6 +8549,86 @@ async function testGasEmail(){
   }catch(e){
     statusEl.innerHTML = '<span style="color:var(--red)">❌ 에러: '+e.message+'</span>';
     toast('❌ 에러: '+e.message,'error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   대리점 마이그레이션 (1회성): DEALER_MASTER → dealers 배열
+═══════════════════════════════════════════════════════ */
+async function migrateDealerMaster(previewOnly){
+  if(!_isRealSuperAdmin()){ toast('총괄관리자 전용','error'); return; }
+  if(typeof DEALER_MASTER === 'undefined'){ toast('DEALER_MASTER 없음','error'); return; }
+  if(typeof dealers === 'undefined' || !Array.isArray(dealers)){ toast('dealers 배열 없음','error'); return; }
+
+  const resultEl = document.getElementById('dealerMigrateResult');
+  const changes = [];
+  let affectedDealers = 0;
+
+  for(const d of dealers){
+    if(!d.code) continue;
+    // N 버전 아닌 기본 코드 마스터 조회
+    const master = DEALER_MASTER[d.code];
+    if(!master) continue;
+
+    const pendingChanges = [];
+    // regNo/ceo/address 보충 (빈 값일 때만)
+    if(!d.regNo && master.regNo){ pendingChanges.push(`사업자번호: ${master.regNo}`); if(!previewOnly) d.regNo = master.regNo; }
+    if(!d.ceo && master.ceo){ pendingChanges.push(`대표자: ${master.ceo}`); if(!previewOnly) d.ceo = master.ceo; }
+    if(!d.address && master.address){
+      // <br> → 쉼표로 치환해서 평문으로 저장
+      const plainAddr = master.address.replace(/<br\s*\/?>/gi, ', ').replace(/\s+/g,' ').trim();
+      pendingChanges.push(`주소: ${plainAddr}`);
+      if(!previewOnly) d.address = plainAddr;
+    }
+
+    // products 배열의 각 항목에 catNo 보충
+    if(Array.isArray(d.products) && master.products){
+      for(const p of d.products){
+        const masterProd = master.products[p.product];
+        if(masterProd && masterProd.catNo && !p.catNo){
+          pendingChanges.push(`${p.product} Cat-No: ${masterProd.catNo}`);
+          if(!previewOnly) p.catNo = masterProd.catNo;
+        }
+      }
+    }
+
+    if(pendingChanges.length > 0){
+      affectedDealers++;
+      changes.push({name: d.name, code: d.code, changes: pendingChanges});
+      if(!previewOnly){
+        d._v = Date.now();
+      }
+    }
+  }
+
+  // 결과 표시
+  if(changes.length === 0){
+    resultEl.innerHTML = '<div style="color:var(--green);padding:8px">✅ 보충할 항목이 없습니다 (모든 대리점 정보가 이미 완성됨)</div>';
+    return;
+  }
+
+  let html = `<div style="font-weight:700;margin-bottom:8px;color:${previewOnly?'var(--blue)':'var(--green)'}">${previewOnly?'🔍 미리보기':'✅ 저장 완료'} - ${affectedDealers}개 대리점, ${changes.reduce((s,c)=>s+c.changes.length,0)}개 항목</div>`;
+  changes.forEach(c => {
+    html += `<div style="padding:6px 10px;border-bottom:1px solid var(--border);background:#f9fafb;margin-bottom:4px;border-radius:4px">
+      <b>${c.name}</b> <span style="color:#888;font-family:monospace;font-size:.72rem">(${c.code})</span>
+      <ul style="margin:4px 0 0 18px;padding:0;font-size:.72rem;color:var(--text2)">
+        ${c.changes.map(ch => `<li>${ch}</li>`).join('')}
+      </ul>
+    </div>`;
+  });
+
+  resultEl.innerHTML = html;
+
+  if(!previewOnly){
+    try{
+      saveLS();
+      await fbSaveAll();
+      toast('✅ 대리점 정보 마이그레이션 완료','success');
+      addAuditLog('edit','대리점', `DEALER_MASTER 일괄 마이그레이션: ${affectedDealers}개 대리점`);
+      refreshAll();
+    }catch(e){
+      toast('❌ 저장 실패: '+e.message,'error');
+    }
   }
 }
 
@@ -9200,55 +9463,54 @@ function closeTaxModal() {
 }
 
 // ── KY출고 → 세금계산서 데이터 빌드 ────────────────────────
-function buildTaxDataFromKyOrder(order) {
-  let dealerCode = null;
-  if(typeof dealers !== 'undefined') {
-    const d = dealers.find(x => x.id === order.dealerId || x.name === order.dealerName);
-    if(d) dealerCode = d.code;
-  }
-  const hasDeliveryFee = (order.fee || 0) > 0;
-  const altCode = dealerCode && !hasDeliveryFee ? (dealerCode + 'N') : null;
-  const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
-               : (dealerCode ? DEALER_MASTER[dealerCode] : null);
+function buildTaxDataFromKyOrder(order, includeDeliveryFee) {
+  const hasFeeAuto = (order.fee || 0) > 0;
+  const includeFee = (includeDeliveryFee === undefined || includeDeliveryFee === null)
+    ? hasFeeAuto
+    : !!includeDeliveryFee;
+
+  const info = getDealerInfo(order.dealerId, order.dealerName, { includeDeliveryFee: includeFee });
   const today = new Date();
   const issueDate = today.getFullYear()+'년 '+(today.getMonth()+1)+'월 '+today.getDate()+'일';
   const PROD_DISPLAY = { 'MEDIAS': 'MEDIAS T', 'MEDIAS T': 'MEDIAS T', 'JUC': 'JUC SPRAY DRESSING 10ml' };
 
   const items = (order.items||[]).map(i => {
-    const pd = master ? (master.products[i.product]||{}) : {};
+    const pd = info ? (info.products[i.product]||{}) : {};
     const unitPrice = pd.price || i.price || 0;
     const qty = Math.abs(i.qty||0);
     const displayName = PROD_DISPLAY[i.product] || i.product;
     return { product: displayName, qty, unitPrice, amount: qty * unitPrice };
   });
-  const deliveryAmt = (master?.products && Object.values(master.products).some(p=>p.delivery)) ? 4500 : 0;
+  const deliveryAmt = includeFee ? (info?._fee || 0) : 0;
   const total = items.reduce((s,i)=>s+i.amount,0) + deliveryAmt;
   const supplyAmt = Math.round(total / 1.1);
   const taxAmt = total - supplyAmt;
 
   return {
-    dealerRegNo: master?.regNo || '',
+    dealerRegNo: info?.regNo || '',
     dealerName:  order.dealerName,
-    dealerCeo:   master?.ceo || '',
-    dealerAddr:  master?.address || '',
-    dealerEmail: master?.email || '',
+    dealerCeo:   info?.ceo || '',
+    dealerAddr:  (info?.address || '').replace(/<br\s*\/?>/gi,', '),
+    dealerEmail: info?.email || '',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
 
-function buildTaxDataFromAmtOrder(order, dealer) {
-  const hasDeliveryFee = (order.fee || 0) > 0;
-  const altCode = dealer.code && !hasDeliveryFee ? (dealer.code + 'N') : null;
-  const master = (altCode && DEALER_MASTER[altCode]) ? DEALER_MASTER[altCode]
-               : (dealer.code ? DEALER_MASTER[dealer.code] : null);
+function buildTaxDataFromAmtOrder(order, dealer, includeDeliveryFee) {
+  const hasFeeAuto = (order.fee || 0) > 0;
+  const includeFee = (includeDeliveryFee === undefined || includeDeliveryFee === null)
+    ? hasFeeAuto
+    : !!includeDeliveryFee;
+
+  const info = getDealerInfo(dealer, dealer.name, { includeDeliveryFee: includeFee });
   const today = new Date();
   const issueDate = today.getFullYear()+'년 '+(today.getMonth()+1)+'월 '+today.getDate()+'일';
   const PROD_DISPLAY = { 'MEDIAS': 'MEDIAS T', 'MEDIAS T': 'MEDIAS T', 'JUC': 'JUC SPRAY DRESSING 10ml' };
-  const pd = master ? (master.products[order.product]||{}) : {};
+  const pd = info ? (info.products[order.product]||{}) : {};
   const unitPrice = order.price || pd.price || 0;
   const qty = Math.abs(order.qty||0);
   const amount = qty * unitPrice;
-  const deliveryAmt = pd.delivery ? 4500 : 0;
+  const deliveryAmt = includeFee ? (info?._fee || 0) : 0;
   const total = amount + deliveryAmt;
   const supplyAmt = Math.round(total / 1.1);
   const taxAmt = total - supplyAmt;
@@ -9256,11 +9518,11 @@ function buildTaxDataFromAmtOrder(order, dealer) {
   const items = [{ product: displayName, qty, unitPrice, amount }];
 
   return {
-    dealerRegNo: master?.regNo || dealer.regNo || '',
+    dealerRegNo: info?.regNo || dealer.regNo || '',
     dealerName:  dealer.name,
-    dealerCeo:   master?.ceo || '',
-    dealerAddr:  master?.address || dealer.address || '',
-    dealerEmail: master?.email || dealer.email || '',
+    dealerCeo:   info?.ceo || dealer.ceo || '',
+    dealerAddr:  ((info?.address || dealer.address) || '').replace(/<br\s*\/?>/gi,', '),
+    dealerEmail: info?.email || dealer.email || '',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
