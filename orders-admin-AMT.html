@@ -8200,8 +8200,13 @@ function impersonateDealer(emailEncoded, dealerName){
   const email = decodeURIComponent(emailEncoded);
   if(!confirm(`"${dealerName}" 대리점 뷰로 새 탭을 여시겠습니까?\n\n• 읽기 전용 가장 모드로 접속됩니다\n• 기본으로 주문 저장이 차단됩니다 (미리보기 전용)\n• 원 대리점의 실제 로그인 세션과 분리됩니다`)) return;
 
-  // 새 탭에서 열기 - orders-KY.html이 쿼리 파라미터 감지
-  const url = 'orders-KY.html?impersonate=' + encodeURIComponent(email) + '&from=super&ts=' + Date.now();
+  // ★ KY 앱은 별도 경로(/KY/)에 배포되어 있으므로 절대 URL 사용
+  // 로컬 개발/테스트 환경에서는 상대 경로 fallback
+  const isGithubPages = location.hostname.endsWith('github.io');
+  const kyBase = isGithubPages
+    ? 'https://amedtech-creator.github.io/KY/orders-KY.html'
+    : 'orders-KY.html';
+  const url = kyBase + '?impersonate=' + encodeURIComponent(email) + '&from=super&ts=' + Date.now();
   window.open(url, '_blank', 'noopener');
   const menu = document.getElementById('roleSwitchMenu');
   if(menu) menu.remove();
