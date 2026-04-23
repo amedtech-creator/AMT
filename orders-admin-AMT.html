@@ -1637,23 +1637,20 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
         </select>
       </div>
       <div class="form-group">
-        <label>구분</label>
-        <select id="invType">
-          <option value="in">입고 (+)</option>
-          <option value="out">출고 (-)</option>
-          <option value="adjust">재고조정 (=)</option>
-        </select>
+        <label>조정 수량 <span class="req">*</span> <span style="font-size:.7rem;color:var(--text3);font-weight:400">(음수 = 분실/손실, 양수 = 발견/추가)</span></label>
+        <input type="number" id="invQty" placeholder="예: -3 (분실), +2 (발견)">
       </div>
-      <div class="form-group">
-        <label>수량 <span class="req">*</span></label>
-        <input type="number" id="invQty" min="1" placeholder="0">
+      <div class="form-group" style="flex:2">
+        <label>사유 / 메모 <span class="req">*</span></label>
+        <input type="text" id="invMemo" placeholder="예: 창고 실사 결과 분실 / 파손 발견 / 재고 실사 오차">
       </div>
-      <div class="form-group">
-        <label>메모</label>
-        <input type="text" id="invMemo" placeholder="선택">
-      </div>
+      <!-- 구분은 항상 '재고조정(adjust)' 고정 -->
+      <input type="hidden" id="invType" value="adjust">
     </div>
-    <button class="btn btn-primary" id="invSaveBtn" onclick="saveInv()">💾 저장</button>
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin:6px 0 12px;font-size:.76rem;color:#1e40af">
+      💡 정상 입출고는 <b>내부거래/발주/KY주문관리</b>에서 처리되며, 이 화면은 <b>분실·손실·실사 오차</b> 등 예외 상황 전용입니다.
+    </div>
+    <button class="btn btn-primary" id="invSaveBtn" onclick="saveInv()">💾 재고조정 저장</button>
   </div>
   <div class="card" style="margin-top:16px">
     <div class="card-header">
@@ -2220,14 +2217,14 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
       <div class="form-group">
         <label>구분 <span class="req">*</span></label>
         <select id="ieType">
-          <option value="in">입고 (+)</option>
-          <option value="out">출고 (−)</option>
-          <option value="adjust">조정 (±)</option>
+          <option value="adjust">재고조정 (±)</option>
+          <option value="in" style="color:#9ca3af">(레거시) 입고 (+)</option>
+          <option value="out" style="color:#9ca3af">(레거시) 출고 (−)</option>
         </select>
       </div>
       <div class="form-group">
-        <label>수량 <span class="req">*</span> <span style="font-size:.7rem;color:var(--text3);font-weight:400">(양수로 입력)</span></label>
-        <input type="number" id="ieQty" min="1" placeholder="0">
+        <label>수량 <span class="req">*</span> <span style="font-size:.7rem;color:var(--text3);font-weight:400">(재고조정: 음수/양수 모두 가능)</span></label>
+        <input type="number" id="ieQty" placeholder="예: -3 또는 +2">
       </div>
       <div class="form-group" style="flex:2">
         <label>메모</label>
@@ -3750,33 +3747,35 @@ function renderInvCards(){
 async function saveInv(){
   const date=document.getElementById('invDate').value;
   const prod=document.getElementById('invProd').value;
-  const type=document.getElementById('invType').value;
-  let qty=parseInt(document.getElementById('invQty').value)||0;
-  const memo=document.getElementById('invMemo').value;
+  const qty=parseInt(document.getElementById('invQty').value)||0;
+  const memo=document.getElementById('invMemo').value.trim();
   const company=_curInvCompany;
-  if(!date||!prod||qty===0){ toast('날짜·제품·수량을 입력하세요','error'); return; }
-  if(type==='adjust'){
-    // 재고조정은 OTP 필요
-    await requireOtp(`${company} 재고조정 (${prod} ${qty}개)`, async () => { await _doSaveInv(date,prod,type,qty,memo,company); });
-    return;
-  }
-  if(type==='out') qty=-Math.abs(qty);
-  else if(type==='in') qty=Math.abs(qty);
-  await _doSaveInv(date,prod,type,qty,memo,company);
+  if(!date||!prod){ toast('날짜·제품을 입력하세요','error'); return; }
+  if(qty===0){ toast('조정 수량을 입력하세요 (음수=분실, 양수=발견)','error'); return; }
+  if(!memo){ toast('사유/메모는 필수입니다 (예: 분실, 파손, 실사오차)','error'); return; }
+  // 재고조정은 OTP 필요 (기존 동작 유지)
+  await requireOtp(`${company} 재고조정 (${prod} ${qty>0?'+':''}${qty}개)`, async () => {
+    await _doSaveInv(date,prod,'adjust',qty,memo,company);
+  });
 }
 
 async function _doSaveInv(date,prod,type,qty,memo,company){
+  // ★ 재고조정은 사용자가 입력한 부호(+/-)를 그대로 유지
+  //    in/out은 레거시 호환용으로만 부호 강제
   if(type==='out') qty=-Math.abs(qty);
   else if(type==='in') qty=Math.abs(qty);
+  // adjust는 qty 그대로 (+/- 모두 허용)
   const item={id:'inv_'+Date.now(),date,product:prod,qty,type,company,memo,createdAt:new Date().toISOString()};
   invLogs.push(item);
-  addAuditLog('create','재고',`${item.company} ${item.product} ${item.type==='in'?'+':''}${item.qty}개 (${item.type==='in'?'입고':'출고'}) ${item.memo||''}`);
+  const typeLabel = type==='in'?'입고':type==='out'?'출고':'조정';
+  addAuditLog('create','재고',`${item.company} ${item.product} ${item.qty>0?'+':''}${item.qty}개 (${typeLabel}) ${item.memo||''}`);
   saveLS();
   await fbSaveDoc('inv',item.id,item);
   // 총관리자 알림 (총관리자가 아닌 경우)
-  notifySuperAdmin(`재고 ${item.type==='in'?'입고':'출고'}: ${item.company} ${item.product} ${item.qty>0?'+':''}${item.qty}개`, '재고');
-  toast('재고 업데이트!','success');
+  notifySuperAdmin(`재고 ${typeLabel}: ${item.company} ${item.product} ${item.qty>0?'+':''}${item.qty}개${item.memo?' ('+item.memo+')':''}`, '재고');
+  toast('✅ 재고조정 저장 완료','success');
   document.getElementById('invQty').value='';
+  document.getElementById('invMemo').value='';
   renderInvCards(); renderInvHistory();
 }
 
@@ -3797,7 +3796,15 @@ function renderInvHistory(){
     <tbody>
     ${list.map(i=>{
       const c=pColors[i.product]||'var(--gray)';
-      const tc=i.type==='out'?'var(--red)':i.type==='adjust'?'var(--yellow)':'var(--green)';
+      // ★ adjust는 부호에 따라 색상/아이콘 다르게
+      let typeLabel, tc;
+      if(i.type === 'in'){ typeLabel='입고'; tc='var(--green)'; }
+      else if(i.type === 'out'){ typeLabel='출고'; tc='var(--red)'; }
+      else /* adjust */ {
+        if(i.qty > 0){ typeLabel='📈 조정(+)'; tc='var(--green)'; }
+        else if(i.qty < 0){ typeLabel='📉 조정(−)'; tc='var(--red)'; }
+        else { typeLabel='조정'; tc='var(--yellow)'; }
+      }
       const co=i.company||'AMT';
       // ★ 자동생성 여부 판별 (발주/내부거래/KY주문 연동)
       const isAuto=!!(i.relOrder||i.relInternal||i.relKyOrder);
@@ -3810,7 +3817,7 @@ function renderInvHistory(){
         <td class="td-mono">${i.date}</td>
         <td><span class="${co==='AMT'?'company-badge-amt':'company-badge-ky'}">${co}</span></td>
         <td><span class="badge" style="background:${c}20;color:${c}">${i.product}</span></td>
-        <td style="color:${tc};font-weight:600;font-size:.75rem">${i.type==='in'?'입고':i.type==='out'?'출고':'조정'}</td>
+        <td style="color:${tc};font-weight:600;font-size:.75rem">${typeLabel}</td>
         <td class="td-mono td-r" style="color:${i.qty<0?'var(--red)':'var(--green)'};font-weight:700">${i.qty>0?'+':''}${fmt(i.qty)}</td>
         <td style="font-size:.75rem;color:var(--text2)">${i.memo||''}</td>
         <td style="text-align:center">${actionCell}</td>
@@ -3848,8 +3855,10 @@ function openEditInvLog(id){
     `<b>${log.company||'AMT'}</b> · <b>${log.product}</b> · 현재: ${log.type==='in'?'입고':log.type==='out'?'출고':'조정'} <b>${log.qty>0?'+':''}${fmt(log.qty)}</b>개 (${log.date})${log.memo?' · '+log.memo:''}`;
   document.getElementById('ieDate').value = log.date || '';
   document.getElementById('ieCompany').value = log.company || 'AMT';
-  document.getElementById('ieType').value = log.type || 'in';
-  document.getElementById('ieQty').value = Math.abs(log.qty || 0);
+  document.getElementById('ieType').value = log.type || 'adjust';
+  // ★ adjust면 부호 그대로, in/out은 절댓값
+  const qtyVal = (log.type === 'adjust') ? (log.qty || 0) : Math.abs(log.qty || 0);
+  document.getElementById('ieQty').value = qtyVal;
   document.getElementById('ieMemo').value = log.memo || '';
 
   document.getElementById('invEditModal').style.display = 'flex';
@@ -3871,21 +3880,18 @@ async function saveInvEdit(){
   const newCompany = document.getElementById('ieCompany').value;
   const newProduct = document.getElementById('ieProduct').value;
   const newType = document.getElementById('ieType').value;
-  const newQtyAbs = parseInt(document.getElementById('ieQty').value) || 0;
+  const newQtyRaw = parseInt(document.getElementById('ieQty').value) || 0;
   const newMemo = document.getElementById('ieMemo').value.trim();
 
   if(!newDate){ toast('날짜를 입력하세요','error'); return; }
   if(!newProduct){ toast('제품을 선택하세요','error'); return; }
-  if(newQtyAbs <= 0){ toast('수량은 1 이상 입력하세요','error'); return; }
+  if(newQtyRaw === 0){ toast('수량을 입력하세요 (재고조정은 음수/양수 모두 가능)','error'); return; }
 
-  // type에 따라 부호 결정 (adjust는 기존 부호 유지, 없으면 +)
+  // type에 따라 부호 결정
   let newQty;
-  if(newType === 'in') newQty = newQtyAbs;
-  else if(newType === 'out') newQty = -newQtyAbs;
-  else /* adjust */ {
-    // 조정은 기존 부호 유지, 새 이력이면 +
-    newQty = (log.qty < 0) ? -newQtyAbs : newQtyAbs;
-  }
+  if(newType === 'in') newQty = Math.abs(newQtyRaw);
+  else if(newType === 'out') newQty = -Math.abs(newQtyRaw);
+  else /* adjust */ newQty = newQtyRaw; // 재고조정은 사용자 입력 부호 그대로
 
   const before = {...log};
   const actionLabel = `재고이력 수정 (${newCompany} ${newProduct} ${newQty>0?'+':''}${fmt(newQty)})`;
