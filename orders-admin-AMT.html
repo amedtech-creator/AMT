@@ -967,15 +967,16 @@ async function sendStatementOnKyShip(order, includeDeliveryFee) {
       return;
     }
 
-    const items = (order.items||[]).map(i => {
+    const items = (order.items||[]).map((i, idx) => {
       const pd = info.products[i.product] || {};
       return {
         product:   i.product,
         catNo:     pd.catNo || '',
         qty:       Math.abs(i.qty),
         unitPrice: pd.price || i.price || 0,
-        delivery:  includeFee && (pd.delivery || hasFeeAuto),
-        deliveryFee: includeFee ? (pd.deliveryFee || info._fee || 0) : 0
+        // ★ 택배비는 첫 번째 품목에만 1회만 부과 (중복 방지)
+        delivery:  includeFee && idx === 0 && (pd.delivery || hasFeeAuto),
+        deliveryFee: (includeFee && idx === 0) ? (pd.deliveryFee || info._fee || 0) : 0
       };
     });
 
