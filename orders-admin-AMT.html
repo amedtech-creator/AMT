@@ -1898,20 +1898,6 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
       <div id="dealerMigrateResult" style="margin-top:10px;font-size:.78rem;max-height:300px;overflow-y:auto"></div>
     </div>
     <hr class="divider">
-    <div class="setting-section" id="adjustMigrateSection" style="display:none">
-      <h3>🔧 재고조정 계산 방식 정정 (1회성)</h3>
-      <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
-        기존 재고조정 이력(+1000, -1 등)이 <b>절대값 세팅</b>으로 처리되어 있어 총재고가 잘못 계산됩니다.<br>
-        이 버튼을 클릭하면 모든 재고조정 항목을 <b>증감값(delta)</b>으로 마이그레이션합니다.<br>
-        <span style="color:var(--red)">※ 총괄관리자 전용, 1회만 실행하면 됨 - 실행 후 재고 수량이 정상화됩니다</span>
-      </p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary btn-sm" onclick="migrateAdjustMode(true)">🔍 미리보기 (저장 안 함)</button>
-        <button class="btn btn-success btn-sm" onclick="migrateAdjustMode(false)">💾 실행 & 저장</button>
-      </div>
-      <div id="adjustMigrateResult" style="margin-top:10px;font-size:.78rem;max-height:300px;overflow-y:auto"></div>
-    </div>
-    <hr class="divider">
     <div class="setting-section">
       <h3>📦 데이터 관리</h3>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2026,21 +2012,25 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
         📧 <b>이메일 + 코드번호</b>로 로그인합니다. 입력 시 Firebase Authentication 계정이 자동 생성됩니다.
       </div>
       <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
-        · 총괄관리자: 전체 조회 가능<br>
-        · 일반관리자: 본인 코드만 조회, 다른 관리자는 마스킹 표시
+        · 총괄관리자: 전체 조회 가능, <b>일반관리자 이메일/코드 변경 · 추가 · 삭제 가능</b><br>
+        · 일반관리자: 본인 코드만 조회/변경 가능 (다른 관리자는 마스킹)<br>
+        · 총괄관리자 이메일은 변경 불가 (시스템 고정)
       </p>
       <button class="btn btn-outline btn-sm" onclick="loadAdminCodes()" style="margin-bottom:12px">🔄 목록 불러오기</button>
       <div id="adminCodeListWrap" style="margin-bottom:14px;max-height:260px;overflow-y:auto"></div>
       <!-- 신규 추가 - 총괄관리자만 -->
       <div id="addAdminBox" style="display:none;background:var(--surface2);border-radius:8px;padding:12px;border:1px solid var(--border)">
-        <div style="font-size:.78rem;font-weight:700;margin-bottom:8px;color:var(--text2)">+ 새 관리자 추가 (총괄관리자 전용)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:.78rem;font-weight:700;color:var(--text2)">+ 새 관리자 추가 (총괄관리자 전용)</div>
+          <div id="addAdminHint" style="font-size:.7rem;color:var(--text3)"></div>
+        </div>
         <div style="display:grid;grid-template-columns:1.2fr 1.5fr 1fr auto;gap:8px;align-items:center">
           <input type="text" id="newAdminName" placeholder="이름 (예: 홍길동)">
           <input type="email" id="newAdminEmail" placeholder="이메일 (example@gmail.com)">
           <input type="text" id="newAdminCode" placeholder="코드번호 (6자리)">
           <button class="btn btn-primary btn-sm" onclick="addAdminCode()">+ 추가</button>
         </div>
-        <div style="font-size:.7rem;color:var(--text3);margin-top:8px">※ Firebase Auth에 자동 등록됩니다</div>
+        <div style="font-size:.7rem;color:var(--text3);margin-top:8px">※ Firebase Auth에 자동 등록됩니다 · 최대 2명 권장</div>
       </div>
     </div>
 
@@ -7016,8 +7006,18 @@ function nav(btn){
   document.getElementById('page-'+page).classList.add('active');
   btn.classList.add('active');
   refreshAll();
-  // 설정 탭 진입 시 수입가격 섹션 표시 여부 결정
-  if(page==='settings') renderImportPriceSection();
+  // 설정 탭 진입 시 자동 로드
+  if(page==='settings'){
+    renderImportPriceSection();
+    // ★ 관리자 목록 자동 로드 (수동 클릭 불필요)
+    if(typeof loadAdminCodes === 'function'){
+      loadAdminCodes().catch(e => console.warn('관리자 목록 로드 실패:', e));
+    }
+    // ★ 대리점 코드 목록도 자동 로드
+    if(typeof loadDealerCodes === 'function'){
+      try { loadDealerCodes(); } catch(e) { console.warn('대리점 목록 로드 실패:', e); }
+    }
+  }
 }
 
 function recTab(name,btn){
@@ -8552,59 +8552,99 @@ function renderAdminCodeList(data){
   const addBox = document.getElementById('addAdminBox');
   if(addBox) addBox.style.display = isSuper ? 'block' : 'none';
 
-  // 하드코딩된 기본 관리자 (데이터 없을 때도 표시)
+  // ★ 기본 관리자 목록
+  // - 총괄관리자: kyunghoyou@gmail.com (고정, 변경 불가)
+  // - 일반관리자: Firebase amt_admins에서 동적으로 읽어옴
+  //   (Firebase에 아무것도 없으면 amedtech@gmail.com을 fallback으로 사용)
   const defaults = [
-    {email:'kyunghoyou@gmail.com', name:'유경호 (총괄)', role:'super'},
-    {email:'amedtech@gmail.com',   name:'강승섭 (일반)', role:'admin'}
+    {email:'kyunghoyou@gmail.com', name:'유경호 (총괄)', role:'super'}
   ];
 
-  // 서버 데이터 + 기본 관리자 merge
-  const list = [...defaults];
-  Object.values(data||{}).forEach(a => {
-    if(!list.find(d => d.email === a.email)) list.push(a);
-  });
-  // 서버 데이터 있으면 defaults의 코드 덮어쓰기
-  list.forEach(a => {
-    const srv = Object.values(data||{}).find(x => x.email === a.email);
-    if(srv) Object.assign(a, srv);
-  });
+  // Firebase amt_admins 에서 일반관리자 추가 (총괄은 제외)
+  const serverAdmins = Object.values(data||{}).filter(a =>
+    a && a.email && a.email !== 'kyunghoyou@gmail.com'
+  );
+
+  // 서버에 일반관리자가 한 명도 없으면 fallback(테스트 계정) 추가
+  if(serverAdmins.length === 0){
+    defaults.push({email:'amedtech@gmail.com', name:'일반관리자 (테스트)', role:'admin', _fallback:true});
+  } else {
+    // 서버 데이터 그대로 사용
+    serverAdmins.forEach(a => defaults.push(a));
+  }
+
+  const list = defaults;
 
   wrap.innerHTML = list.map(a => {
     const isMine = a.email === myEmail;
     const canSee = isSuper || isMine;
     const codeDisplay = canSee ? (a.code||'─') : '●●●●●●';
-    const canEdit = isSuper || isMine;
+    const canEditCode = isSuper || isMine;
+    const isSuperRow = a.role === 'super';
+    // ★ 일반관리자(admin)의 이메일은 총괄만 변경 가능
+    const canEditEmail = isSuper && !isSuperRow;
     const safeEmail = a.email.replace(/[^a-zA-Z0-9]/g,'_');
+    const fallbackBadge = a._fallback
+      ? '<span style="font-size:.6rem;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;margin-left:4px" title="이 계정은 아직 DB에 저장되지 않았습니다. 코드를 입력하고 저장 버튼을 눌러 등록하세요">⚠️ 미등록</span>'
+      : '';
     return `
-    <div style="display:grid;grid-template-columns:1.5fr 2fr 1fr auto;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);align-items:center;font-size:.85rem">
-      <span style="font-weight:700">${a.name||'─'}${isMine?'<span style="font-size:.65rem;margin-left:4px;color:var(--yellow)">(나)</span>':''}</span>
-      <span style="font-family:monospace;font-size:.78rem;color:var(--text2)">${a.email}</span>
-      ${canEdit
-        ? `<input type="text" id="acode_${safeEmail}" value="${codeDisplay}"
+    <div style="display:grid;grid-template-columns:1.3fr 2.2fr 1fr auto;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);align-items:center;font-size:.85rem">
+      <span style="font-weight:700">${a.name||'─'}${isMine?'<span style="font-size:.65rem;margin-left:4px;color:var(--yellow)">(나)</span>':''}${fallbackBadge}${isSuperRow?' <span style="font-size:.6rem;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:8px">총괄</span>':''}</span>
+      ${canEditEmail
+        ? `<input type="email" id="aemail_${safeEmail}" value="${a.email}" placeholder="이메일"
+            style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:monospace;font-size:.78rem" data-orig-email="${a.email}">`
+        : `<span style="font-family:monospace;font-size:.78rem;color:var(--text2)">${a.email}${isSuperRow?' 🔒':''}</span>`
+      }
+      ${canEditCode
+        ? `<input type="text" id="acode_${safeEmail}" value="${a._fallback?'':codeDisplay}" placeholder="${a._fallback?'6자리 코드':''}"
             style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:monospace;font-size:.85rem;font-weight:700;text-align:center">`
         : `<span style="font-family:monospace;font-size:.85rem;color:#9ca3af;padding:5px 8px;text-align:center">${codeDisplay}</span>`
       }
       <div style="display:flex;gap:4px">
-        ${canEdit ? `<button class="btn btn-primary btn-xs" onclick="saveOneAdminCode('${a.email}','${a.name||''}')">저장</button>` : ''}
-        ${isSuper && a.role !== 'super' ? `<button class="btn btn-danger btn-xs" onclick="deleteAdminCode('${a.email}')">🗑</button>` : ''}
+        ${(canEditCode || canEditEmail) ? `<button class="btn btn-primary btn-xs" onclick="saveOneAdminCode('${a.email}','${a.name||''}')">저장</button>` : ''}
+        ${isSuper && !isSuperRow && !a._fallback ? `<button class="btn btn-danger btn-xs" onclick="deleteAdminCode('${a.email}')" title="삭제">🗑</button>` : ''}
       </div>
     </div>`;
   }).join('');
+
+  // ★ 일반관리자 인원 수에 따라 추가 박스 안내 업데이트
+  const addBoxHint = document.getElementById('addAdminHint');
+  if(addBoxHint){
+    const nonSuperCount = list.filter(a => a.role !== 'super' && !a._fallback).length;
+    if(nonSuperCount >= 2){
+      addBoxHint.textContent = `⚠️ 현재 일반관리자 ${nonSuperCount}명 — 최대 2명까지 권장`;
+      addBoxHint.style.color = 'var(--yellow)';
+    } else {
+      addBoxHint.textContent = `현재 일반관리자 ${nonSuperCount}명 (최대 2명 권장)`;
+      addBoxHint.style.color = 'var(--text3)';
+    }
+  }
 }
 
-async function saveOneAdminCode(email, name){
+async function saveOneAdminCode(origEmail, name){
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
-  const safeEmail = email.replace(/[^a-zA-Z0-9]/g,'_');
-  const inputEl = document.getElementById('acode_'+safeEmail);
-  const newCode = (inputEl ? inputEl.value : '').trim();
+  const safeEmail = origEmail.replace(/[^a-zA-Z0-9]/g,'_');
+  const codeEl  = document.getElementById('acode_'+safeEmail);
+  const emailEl = document.getElementById('aemail_'+safeEmail);
+  const newCode = (codeEl ? codeEl.value : '').trim();
+  // ★ 이메일 입력칸이 있으면 (총괄이 일반관리자 편집 시) 새 이메일 사용, 없으면 기존 이메일
+  const newEmail = (emailEl ? emailEl.value.trim().toLowerCase() : origEmail);
   if(!newCode){ alert('코드를 입력하세요'); return; }
   if(!/^\d{4,10}$/.test(newCode)){ alert('코드는 숫자 4~10자리여야 합니다'); return; }
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail)){ alert('이메일 형식이 올바르지 않습니다'); return; }
+  // ★ 총괄관리자 이메일은 절대 변경 불가 (안전장치)
+  if(origEmail === 'kyunghoyou@gmail.com' && newEmail !== origEmail){
+    alert('총괄관리자 이메일은 변경할 수 없습니다');
+    return;
+  }
+
+  const emailChanged = (newEmail !== origEmail);
 
   // ★ Fix 5: 저장 버튼 비활성화 + 스피너
   let saveBtn = null;
-  if(inputEl){
-    const row = inputEl.closest('div');
+  if(codeEl){
+    const row = codeEl.closest('div');
     if(row) saveBtn = row.querySelector('button');
   }
   const origText = saveBtn ? saveBtn.textContent : '';
@@ -8615,24 +8655,33 @@ async function saveOneAdminCode(email, name){
   }
   toast('💾 저장 중...','info');
 
-  // 본인 코드 변경 여부 확인
+  // 본인 코드/이메일 변경 여부 확인
   const myEmail = (JSON.parse(sessionStorage.getItem('amt_auth_session')||'{}').email)||'';
-  const isMine = email === myEmail;
+  const isMine = origEmail === myEmail;
 
   try{
-    const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
-    const adminName = name || email;
-    const role = email==='kyunghoyou@gmail.com'?'super':'admin';
+    const key = btoa(newEmail).replace(/[^a-zA-Z0-9]/g,'_');
+    const adminName = name || newEmail;
+    const role = newEmail==='kyunghoyou@gmail.com'?'super':'admin';
 
     // ★ Auth 계정 보장 (더미PW 방식 - 계정 없으면 생성, 있으면 건드리지 않음)
     try{
-      await ensureAuthAccount(email, newCode, adminName);
+      await ensureAuthAccount(newEmail, newCode, adminName);
     }catch(e){ console.warn('Auth 계정 보장 실패', e); }
+
+    // ★ 이메일이 바뀌었으면 기존 레코드 삭제 (키가 이메일 기반이라 새로 저장됨)
+    if(emailChanged){
+      const oldKey = btoa(origEmail).replace(/[^a-zA-Z0-9]/g,'_');
+      try{
+        await fb.set(fb.ref(fb.db,'amt_admins/'+oldKey), null);
+        console.log('기존 관리자 레코드 삭제:', origEmail);
+      }catch(e){ console.warn('기존 레코드 삭제 실패:', e); }
+    }
 
     // ★ amt_admins (단일 저장소 - 이메일 기반 풍부한 정보)
     // amt_pw는 더 이상 사용하지 않음 (키에 한글/특수문자 쓸 때 Firebase 오류 발생)
     await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
-      email, name:adminName, code:newCode, role,
+      email: newEmail, name:adminName, code:newCode, role,
       updatedAt: new Date().toISOString()
     });
 
@@ -8642,20 +8691,23 @@ async function saveOneAdminCode(email, name){
       saveBtn.style.opacity = '1';
       setTimeout(()=>{ saveBtn.textContent = origText; }, 1500);
     }
-    toast('✅ '+adminName+' 코드 저장됨 (즉시 적용)','success');
+    const savedMsg = emailChanged
+      ? `✅ ${adminName} 저장됨 (이메일: ${origEmail} → ${newEmail})`
+      : `✅ ${adminName} 코드 저장됨 (즉시 적용)`;
+    toast(savedMsg,'success');
     loadAdminCodes();
 
     // ★ 본인 코드 변경 시 → 세션/저장코드 제거 후 강제 로그아웃
     if(isMine){
       setTimeout(()=>{
-        if(confirm('⚠️ 본인 코드가 변경되었습니다.\n\n보안상 지금 로그아웃하고 새 코드로 다시 로그인해야 합니다.')){
+        if(confirm('⚠️ 본인 코드/이메일이 변경되었습니다.\n\n보안상 지금 로그아웃하고 새 정보로 다시 로그인해야 합니다.')){
           // 로컬 저장된 모든 인증 정보 제거
           try{
             sessionStorage.removeItem('amt_auth_session');
             localStorage.removeItem('amt_saved_code');
             localStorage.removeItem('amt_autologin_ok');
             // 기기 신뢰 표시도 리셋
-            localStorage.removeItem('amt_device_verified_'+btoa(email).replace(/=/g,''));
+            localStorage.removeItem('amt_device_verified_'+btoa(origEmail).replace(/=/g,''));
           }catch(e){}
           location.replace('index-AMT.html');
         } else {
@@ -8696,20 +8748,39 @@ async function addAdminCode(){
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ alert('이메일 형식이 올바르지 않습니다'); return; }
   if(!/^\d{4,10}$/.test(code)){ alert('코드는 숫자 4~10자리'); return; }
 
-  // ★ Fix: saveOneAdminCode는 기존 행의 DOM input(acode_xxx)에서 코드를 읽는 구조라
-  //         신규 추가 시엔 해당 input이 없어 코드가 ''가 됨 → 직접 FB 저장으로 우회
+  // ★ 총괄 이메일 추가 금지
+  if(email === 'kyunghoyou@gmail.com'){
+    alert('총괄관리자 이메일은 이미 등록되어 있습니다');
+    return;
+  }
+
   const fb = window._fb;
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
-  const key  = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
-  const role = email==='kyunghoyou@gmail.com' ? 'super' : 'admin';
 
   try{
+    // ★ 현재 일반관리자 수 체크 (최대 2명)
+    const snap = await fb.get(fb.ref(fb.db,'amt_admins'));
+    const existing = snap.exists() ? snap.val() : {};
+    const currentAdmins = Object.values(existing).filter(a =>
+      a && a.email && a.email !== 'kyunghoyou@gmail.com'
+    );
+    // 중복 이메일 체크
+    if(currentAdmins.find(a => a.email === email)){
+      alert('이미 등록된 이메일입니다');
+      return;
+    }
+    // 최대 2명 제한
+    if(currentAdmins.length >= 2){
+      if(!confirm(`현재 일반관리자가 이미 ${currentAdmins.length}명 있습니다.\n\n권장 인원(2명)을 초과하지만 계속 추가하시겠습니까?`)) return;
+    }
+
+    const key  = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
     toast('💾 저장 중...','info');
     try{ await ensureAuthAccount(email, code, name); }
     catch(e){ console.warn('Auth 계정 보장 실패', e); }
 
     await fb.set(fb.ref(fb.db,'amt_admins/'+key), {
-      email, name, code, role,
+      email, name, code, role: 'admin',
       updatedAt: new Date().toISOString()
     });
 
@@ -9089,10 +9160,6 @@ async function initGasEmailSettings(){
   const migSection = document.getElementById('dealerMigrateSection');
   if(migSection) migSection.style.display = 'block';
 
-  // ★ 재고조정 마이그레이션 섹션도 총괄에게만 노출
-  const adjMigSection = document.getElementById('adjustMigrateSection');
-  if(adjMigSection) adjMigSection.style.display = 'block';
-
   // 현재 저장된 URL 로드 (Firebase 우선 → 없으면 localStorage)
   let savedUrl = '';
   try{
@@ -9243,94 +9310,6 @@ async function migrateDealerMaster(previewOnly){
       await fbSaveAll();
       toast('✅ 대리점 정보 마이그레이션 완료','success');
       addAuditLog('edit','대리점', `DEALER_MASTER 일괄 마이그레이션: ${affectedDealers}개 대리점`);
-      refreshAll();
-    }catch(e){
-      toast('❌ 저장 실패: '+e.message,'error');
-    }
-  }
-}
-
-/* ═══════════════════════════════════════════════════════
-   재고조정 계산방식 마이그레이션 (1회성)
-   - 기존 adjust 이력 (adjustMode 없음) → adjustMode='delta' 로 변환
-   - 레거시 절대값 모드를 증감값 모드로 바꿈
-═══════════════════════════════════════════════════════ */
-async function migrateAdjustMode(previewOnly){
-  if(!_isRealSuperAdmin()){ toast('총괄관리자 전용','error'); return; }
-  if(!Array.isArray(invLogs)){ toast('invLogs 없음','error'); return; }
-
-  const resultEl = document.getElementById('adjustMigrateResult');
-  const targets = invLogs.filter(i => i.type === 'adjust' && i.adjustMode !== 'delta');
-
-  if(targets.length === 0){
-    resultEl.innerHTML = '<div style="color:var(--green);padding:8px">✅ 변환할 항목이 없습니다 (모두 이미 최신 방식)</div>';
-    return;
-  }
-
-  // 미리보기: 변경 전후 총재고 계산
-  const productsSet = new Set(targets.map(t => `${t.company||'AMT'}|${t.product}`));
-  const beforeStock = {};
-  productsSet.forEach(key => {
-    const [company, prod] = key.split('|');
-    beforeStock[key] = calcStock(prod, company);
-  });
-
-  // 가상 변경 (미리보기)
-  if(!previewOnly){
-    targets.forEach(t => { t.adjustMode = 'delta'; t._v = Date.now(); });
-  } else {
-    // 미리보기용 임시 변경
-    targets.forEach(t => { t._previewDelta = true; });
-  }
-
-  // after 계산 (adjustMode='delta' 가정)
-  const afterStock = {};
-  productsSet.forEach(key => {
-    const [company, prod] = key.split('|');
-    let total = 0;
-    const logs = invLogs.filter(i => i.product===prod && (i.company||'AMT')===company)
-      .sort((a,b)=>a.date.localeCompare(b.date)||(a.createdAt||'').localeCompare(b.createdAt||''));
-    logs.forEach(i => {
-      if(i.type === 'adjust'){
-        // 미리보기에서는 _previewDelta 플래그로 판정
-        const isDelta = previewOnly ? !!i._previewDelta : (i.adjustMode === 'delta');
-        if(isDelta) total += i.qty;
-        else total = i.qty;
-      } else {
-        total += i.qty;
-      }
-    });
-    afterStock[key] = total;
-  });
-
-  // 미리보기 임시플래그 제거
-  if(previewOnly){
-    targets.forEach(t => { delete t._previewDelta; });
-  }
-
-  let html = `<div style="font-weight:700;margin-bottom:8px;color:${previewOnly?'var(--blue)':'var(--green)'}">${previewOnly?'🔍 미리보기':'✅ 저장 완료'} - ${targets.length}개 재고조정 이력</div>`;
-  html += '<table style="width:100%;font-size:.72rem;border-collapse:collapse"><thead><tr style="background:#f3f4f6"><th style="padding:6px;text-align:left">회사 · 제품</th><th style="padding:6px;text-align:right">변환 전 재고</th><th style="padding:6px;text-align:right">변환 후 재고</th></tr></thead><tbody>';
-  Array.from(productsSet).forEach(key => {
-    const [company, prod] = key.split('|');
-    const b = beforeStock[key], a = afterStock[key];
-    const diff = a - b;
-    const diffColor = diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--text2)';
-    html += `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:5px 6px"><b>${company}</b> · ${prod}</td>
-      <td style="padding:5px 6px;text-align:right;font-family:monospace">${fmt(b)}</td>
-      <td style="padding:5px 6px;text-align:right;font-family:monospace;font-weight:700;color:${diffColor}">${fmt(a)}${diff!==0?` (${diff>0?'+':''}${fmt(diff)})`:''}</td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-
-  resultEl.innerHTML = html;
-
-  if(!previewOnly){
-    try{
-      saveLS();
-      await fbSaveAll();
-      toast('✅ 재고조정 계산방식 마이그레이션 완료','success');
-      addAuditLog('edit','재고', `재고조정 계산방식 정정: ${targets.length}개 이력 → delta 모드`);
       refreshAll();
     }catch(e){
       toast('❌ 저장 실패: '+e.message,'error');
