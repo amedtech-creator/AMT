@@ -803,9 +803,18 @@ function buildStatementHTML(items, dealerName, dealerInfo, orderId) {
 
 // ── 실제 EmailJS 발송 공통 함수 ──────────────────────────────
 async function sendStatementEmail(dealerName, dealerEmail, orderId, statementHTML) {
+  // ★ 수신자 이메일 검증 (빈 값으로 EmailJS 호출 방지)
+  if(!dealerEmail || !dealerEmail.trim()){
+    console.error('❌ 거래명세서 발송 중단: 수신자 이메일 없음', {dealerName, orderId});
+    toast('⚠️ '+dealerName+' 이메일 없음 - 거래명세서 미발송','error');
+    throw new Error('수신자 이메일 없음 ('+dealerName+')');
+  }
+  console.log('📧 거래명세서 발송 시도 →', dealerEmail, '(대리점:', dealerName, '/ 주문:', orderId, ')');
   await emailjs.send('service_bz3i3j6', 'template_gpbeyhn', {
     dealer_name:    dealerName,
     dealer_email:   dealerEmail,
+    to_email:       dealerEmail, // ★ EmailJS 템플릿의 "To Email" 필드가 {{to_email}}일 수도 있어 둘 다 전송
+    email:          dealerEmail, // ★ 또는 {{email}}
     order_number:   orderId,
     statement_html: statementHTML
   });
