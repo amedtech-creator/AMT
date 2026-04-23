@@ -2193,6 +2193,57 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
   </div>
 </div>
 
+<!-- ═══ 재고이력 수정 모달 (invLog) ═══ -->
+<div id="invEditModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9997;align-items:center;justify-content:center;padding:16px;box-sizing:border-box">
+  <div style="background:#fff;border-radius:14px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.2);padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+      <div style="font-size:1rem;font-weight:800">✏️ 재고이력 수정</div>
+      <button onclick="closeInvEdit()" style="border:none;background:var(--gray-light);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.85rem">✕ 닫기</button>
+    </div>
+    <div id="invEditInfo" style="font-size:.8rem;background:var(--surface2);border-radius:8px;padding:10px 14px;margin-bottom:16px;color:var(--text2)"></div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>날짜 <span class="req">*</span></label>
+        <input type="date" id="ieDate">
+      </div>
+      <div class="form-group">
+        <label>회사 <span class="req">*</span></label>
+        <select id="ieCompany">
+          <option value="AMT">AMT</option>
+          <option value="KY">KY</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>제품 <span class="req">*</span></label>
+        <select id="ieProduct"></select>
+      </div>
+      <div class="form-group">
+        <label>구분 <span class="req">*</span></label>
+        <select id="ieType">
+          <option value="in">입고 (+)</option>
+          <option value="out">출고 (−)</option>
+          <option value="adjust">조정 (±)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>수량 <span class="req">*</span> <span style="font-size:.7rem;color:var(--text3);font-weight:400">(양수로 입력)</span></label>
+        <input type="number" id="ieQty" min="1" placeholder="0">
+      </div>
+      <div class="form-group" style="flex:2">
+        <label>메모</label>
+        <input type="text" id="ieMemo" placeholder="선택사항">
+      </div>
+    </div>
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:.76rem;color:#92400e;margin-bottom:16px">
+      ⚠️ 수정 시 재고 수량이 즉시 재계산되며, 모든 관리자 화면에 실시간 반영됩니다.
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeInvEdit()">취소</button>
+      <button class="btn btn-primary" onclick="saveInvEdit()">💾 수정 저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ 반품 수정 모달 ═══ -->
 <div id="returnEditModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9996;align-items:center;justify-content:center;padding:16px;box-sizing:border-box">
   <div style="background:#fff;border-radius:14px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.2);padding:24px">
@@ -3742,13 +3793,19 @@ function renderInvHistory(){
 
   if(!list.length){ document.getElementById('invHistory').innerHTML=emptyHtml('이력 없음'); return; }
   document.getElementById('invHistory').innerHTML=`<div class="table-wrap"><table>
-    <thead><tr><th>날짜</th><th>회사</th><th>제품</th><th>구분</th><th>수량</th><th>메모</th></tr></thead>
+    <thead><tr><th>날짜</th><th>회사</th><th>제품</th><th>구분</th><th>수량</th><th>메모</th><th style="width:110px">액션</th></tr></thead>
     <tbody>
     ${list.map(i=>{
       const c=pColors[i.product]||'var(--gray)';
       const tc=i.type==='out'?'var(--red)':i.type==='adjust'?'var(--yellow)':'var(--green)';
       const co=i.company||'AMT';
-      const isAuto=!!(i.relOrder||i.relInternal); // 자동생성 여부
+      // ★ 자동생성 여부 판별 (발주/내부거래/KY주문 연동)
+      const isAuto=!!(i.relOrder||i.relInternal||i.relKyOrder);
+      const autoReason = i.relOrder ? '발주' : i.relInternal ? '내부거래' : i.relKyOrder ? 'KY주문' : '';
+      const actionCell = isAuto
+        ? `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:6px;font-size:.68rem;font-weight:600" title="${autoReason}에서 자동 생성됨 - 원천에서 수정/삭제하세요">🔒 ${autoReason}</span>`
+        : `<button class="btn btn-outline btn-xs" onclick="openEditInvLog('${i.id}')" style="padding:3px 7px;margin-right:3px" title="수정">✏️</button>
+           <button class="btn btn-danger btn-xs" onclick="deleteInvLog('${i.id}')" style="padding:3px 7px" title="삭제">🗑</button>`;
       return `<tr>
         <td class="td-mono">${i.date}</td>
         <td><span class="${co==='AMT'?'company-badge-amt':'company-badge-ky'}">${co}</span></td>
@@ -3756,6 +3813,7 @@ function renderInvHistory(){
         <td style="color:${tc};font-weight:600;font-size:.75rem">${i.type==='in'?'입고':i.type==='out'?'출고':'조정'}</td>
         <td class="td-mono td-r" style="color:${i.qty<0?'var(--red)':'var(--green)'};font-weight:700">${i.qty>0?'+':''}${fmt(i.qty)}</td>
         <td style="font-size:.75rem;color:var(--text2)">${i.memo||''}</td>
+        <td style="text-align:center">${actionCell}</td>
       </tr>`;
     }).join('')}
     </tbody>
@@ -3763,6 +3821,123 @@ function renderInvHistory(){
 }
 
 // 재고이력 수정 모달
+/* ═══════════════════════════════════════════════════════
+   재고이력 수정/삭제 (invLogs)
+   - 수동 입력분만 수정/삭제 허용 (자동생성은 UI에서 차단됨)
+   - requireOtp로 일반관리자는 OTP 검증
+   - tombstone 기록으로 ghost data 방지
+═══════════════════════════════════════════════════════ */
+let _editingInvId = null;
+
+function openEditInvLog(id){
+  const log = invLogs.find(x => x.id === id);
+  if(!log){ toast('재고이력을 찾을 수 없습니다','error'); return; }
+  // 자동생성 방어 (UI에서 이미 차단했지만 이중 안전장치)
+  if(log.relOrder || log.relInternal || log.relKyOrder){
+    toast('자동생성 항목은 원천(발주/내부거래/KY주문)에서 수정하세요','error');
+    return;
+  }
+
+  _editingInvId = id;
+
+  // 제품 드롭다운 채우기
+  const pEl = document.getElementById('ieProduct');
+  pEl.innerHTML = products.map(p => `<option value="${p}"${p===log.product?' selected':''}>${p}</option>`).join('');
+
+  document.getElementById('invEditInfo').innerHTML =
+    `<b>${log.company||'AMT'}</b> · <b>${log.product}</b> · 현재: ${log.type==='in'?'입고':log.type==='out'?'출고':'조정'} <b>${log.qty>0?'+':''}${fmt(log.qty)}</b>개 (${log.date})${log.memo?' · '+log.memo:''}`;
+  document.getElementById('ieDate').value = log.date || '';
+  document.getElementById('ieCompany').value = log.company || 'AMT';
+  document.getElementById('ieType').value = log.type || 'in';
+  document.getElementById('ieQty').value = Math.abs(log.qty || 0);
+  document.getElementById('ieMemo').value = log.memo || '';
+
+  document.getElementById('invEditModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeInvEdit(){
+  document.getElementById('invEditModal').style.display = 'none';
+  document.body.style.overflow = '';
+  _editingInvId = null;
+}
+
+async function saveInvEdit(){
+  if(!_editingInvId){ toast('수정할 이력이 없습니다','error'); return; }
+  const log = invLogs.find(x => x.id === _editingInvId);
+  if(!log){ toast('재고이력을 찾을 수 없습니다','error'); return; }
+
+  const newDate = document.getElementById('ieDate').value;
+  const newCompany = document.getElementById('ieCompany').value;
+  const newProduct = document.getElementById('ieProduct').value;
+  const newType = document.getElementById('ieType').value;
+  const newQtyAbs = parseInt(document.getElementById('ieQty').value) || 0;
+  const newMemo = document.getElementById('ieMemo').value.trim();
+
+  if(!newDate){ toast('날짜를 입력하세요','error'); return; }
+  if(!newProduct){ toast('제품을 선택하세요','error'); return; }
+  if(newQtyAbs <= 0){ toast('수량은 1 이상 입력하세요','error'); return; }
+
+  // type에 따라 부호 결정 (adjust는 기존 부호 유지, 없으면 +)
+  let newQty;
+  if(newType === 'in') newQty = newQtyAbs;
+  else if(newType === 'out') newQty = -newQtyAbs;
+  else /* adjust */ {
+    // 조정은 기존 부호 유지, 새 이력이면 +
+    newQty = (log.qty < 0) ? -newQtyAbs : newQtyAbs;
+  }
+
+  const before = {...log};
+  const actionLabel = `재고이력 수정 (${newCompany} ${newProduct} ${newQty>0?'+':''}${fmt(newQty)})`;
+
+  await requireOtp(actionLabel, async () => {
+    log.date = newDate;
+    log.company = newCompany;
+    log.product = newProduct;
+    log.type = newType;
+    log.qty = newQty;
+    log.memo = newMemo;
+    log.updatedAt = new Date().toISOString();
+    log._v = Date.now(); // 병합 시 최신으로 인식
+
+    addAuditLog('edit','재고',
+      `재고이력 수정: ${before.company||'AMT'} ${before.product} ${fmt(before.qty)} → ${newCompany} ${newProduct} ${fmt(newQty)} (${before.date}→${newDate})`, before);
+
+    saveLS();
+    await fbSaveAll();
+    toast('✅ 재고이력 수정 완료 (실시간 동기화됨)','success');
+    closeInvEdit();
+    refreshAll();
+  });
+}
+
+async function deleteInvLog(id){
+  const log = invLogs.find(x => x.id === id);
+  if(!log){ toast('재고이력을 찾을 수 없습니다','error'); return; }
+  // 자동생성 방어
+  if(log.relOrder || log.relInternal || log.relKyOrder){
+    toast('자동생성 항목은 원천에서 삭제하세요','error');
+    return;
+  }
+
+  if(!confirm(`이 재고이력을 삭제할까요?\n\n${log.company||'AMT'} · ${log.product} · ${log.type==='in'?'입고':log.type==='out'?'출고':'조정'} ${log.qty>0?'+':''}${fmt(log.qty)}개\n${log.date}${log.memo?' · '+log.memo:''}\n\n⚠️ 삭제 후 재고 수량이 재계산됩니다.`)) return;
+
+  const actionLabel = `재고이력 삭제 (${log.company||'AMT'} ${log.product} ${fmt(log.qty)})`;
+
+  await requireOtp(actionLabel, async () => {
+    addAuditLog('delete','재고',
+      `재고이력 삭제: ${log.company||'AMT'} ${log.product} ${fmt(log.qty)}개 (${log.date})${log.memo?' · '+log.memo:''}`, log);
+
+    _trackDelete('invLogs', id); // ★ tombstone 기록 (ghost data 방지)
+    invLogs = invLogs.filter(x => x.id !== id);
+
+    saveLS();
+    await fbSaveAll();
+    toast('✅ 재고이력 삭제 완료 (실시간 동기화됨)','info');
+    refreshAll();
+  });
+}
+
 /* ═══════════════════════════════════════════════════════
    INTERNAL TRADE (AMT → KY)
 ═══════════════════════════════════════════════════════ */
