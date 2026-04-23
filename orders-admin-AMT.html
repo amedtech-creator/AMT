@@ -1855,6 +1855,20 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
       <div id="dealerMigrateResult" style="margin-top:10px;font-size:.78rem;max-height:300px;overflow-y:auto"></div>
     </div>
     <hr class="divider">
+    <div class="setting-section" id="adjustMigrateSection" style="display:none">
+      <h3>🔧 재고조정 계산 방식 정정 (1회성)</h3>
+      <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
+        기존 재고조정 이력(+1000, -1 등)이 <b>절대값 세팅</b>으로 처리되어 있어 총재고가 잘못 계산됩니다.<br>
+        이 버튼을 클릭하면 모든 재고조정 항목을 <b>증감값(delta)</b>으로 마이그레이션합니다.<br>
+        <span style="color:var(--red)">※ 총괄관리자 전용, 1회만 실행하면 됨 - 실행 후 재고 수량이 정상화됩니다</span>
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="migrateAdjustMode(true)">🔍 미리보기 (저장 안 함)</button>
+        <button class="btn btn-success btn-sm" onclick="migrateAdjustMode(false)">💾 실행 & 저장</button>
+      </div>
+      <div id="adjustMigrateResult" style="margin-top:10px;font-size:.78rem;max-height:300px;overflow-y:auto"></div>
+    </div>
+    <hr class="divider">
     <div class="setting-section">
       <h3>📦 데이터 관리</h3>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -3691,11 +3705,17 @@ function calcStock(prod, company=null){
   let total=0;
   let logs=invLogs.filter(i=>i.product===prod);
   if(company) logs=logs.filter(i=>(i.company||'AMT')===company);
-  // ★ 날짜+createdAt 오름차순 정렬 → adjust(=절대값 설정)가 정확히 처리됨
+  // ★ 날짜+createdAt 오름차순 정렬 → adjust(절대값 레거시) 가 정확히 처리됨
   logs.sort((a,b)=>a.date.localeCompare(b.date)||(a.createdAt||'').localeCompare(b.createdAt||''));
   logs.forEach(i=>{
-    if(i.type==='adjust') total=i.qty; // 절대값 세팅
-    else total+=i.qty;                 // 상대값 가감
+    if(i.type==='adjust'){
+      // ★ adjustMode='delta'면 증감값으로 처리 (신규 UX - 분실/발견)
+      // ★ 그 외(레거시)는 절대값 세팅 (과거 호환)
+      if(i.adjustMode === 'delta') total += i.qty;
+      else total = i.qty; // 레거시 절대값 세팅
+    } else {
+      total += i.qty; // 입고/출고는 상대값 가감
+    }
   });
   return total;
 }
@@ -3766,6 +3786,8 @@ async function _doSaveInv(date,prod,type,qty,memo,company){
   else if(type==='in') qty=Math.abs(qty);
   // adjust는 qty 그대로 (+/- 모두 허용)
   const item={id:'inv_'+Date.now(),date,product:prod,qty,type,company,memo,createdAt:new Date().toISOString()};
+  // ★ 새로 저장되는 adjust는 delta 모드 (증감값) - 레거시 절대값과 구분
+  if(type==='adjust') item.adjustMode = 'delta';
   invLogs.push(item);
   const typeLabel = type==='in'?'입고':type==='out'?'출고':'조정';
   addAuditLog('create','재고',`${item.company} ${item.product} ${item.qty>0?'+':''}${item.qty}개 (${typeLabel}) ${item.memo||''}`);
@@ -3903,6 +3925,9 @@ async function saveInvEdit(){
     log.type = newType;
     log.qty = newQty;
     log.memo = newMemo;
+    // ★ adjust로 수정되면 delta 모드 마크 (신규 UX)
+    if(newType === 'adjust') log.adjustMode = 'delta';
+    else delete log.adjustMode;
     log.updatedAt = new Date().toISOString();
     log._v = Date.now(); // 병합 시 최신으로 인식
 
@@ -6958,8 +6983,13 @@ function calcStockAtDate(prod, company, dateStr){
   logs.sort((a,b) => a.date.localeCompare(b.date) || (a.createdAt||'').localeCompare(b.createdAt||''));
   let total = 0;
   logs.forEach(i => {
-    if(i.type==='adjust') total = i.qty;
-    else total += i.qty;
+    if(i.type==='adjust'){
+      // ★ adjustMode='delta'면 증감값 (신규), 그 외 레거시는 절대값
+      if(i.adjustMode === 'delta') total += i.qty;
+      else total = i.qty;
+    } else {
+      total += i.qty;
+    }
   });
   return total;
 }
@@ -8656,6 +8686,10 @@ async function initGasEmailSettings(){
   const migSection = document.getElementById('dealerMigrateSection');
   if(migSection) migSection.style.display = 'block';
 
+  // ★ 재고조정 마이그레이션 섹션도 총괄에게만 노출
+  const adjMigSection = document.getElementById('adjustMigrateSection');
+  if(adjMigSection) adjMigSection.style.display = 'block';
+
   // 현재 저장된 URL 로드 (Firebase 우선 → 없으면 localStorage)
   let savedUrl = '';
   try{
@@ -8806,6 +8840,94 @@ async function migrateDealerMaster(previewOnly){
       await fbSaveAll();
       toast('✅ 대리점 정보 마이그레이션 완료','success');
       addAuditLog('edit','대리점', `DEALER_MASTER 일괄 마이그레이션: ${affectedDealers}개 대리점`);
+      refreshAll();
+    }catch(e){
+      toast('❌ 저장 실패: '+e.message,'error');
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   재고조정 계산방식 마이그레이션 (1회성)
+   - 기존 adjust 이력 (adjustMode 없음) → adjustMode='delta' 로 변환
+   - 레거시 절대값 모드를 증감값 모드로 바꿈
+═══════════════════════════════════════════════════════ */
+async function migrateAdjustMode(previewOnly){
+  if(!_isRealSuperAdmin()){ toast('총괄관리자 전용','error'); return; }
+  if(!Array.isArray(invLogs)){ toast('invLogs 없음','error'); return; }
+
+  const resultEl = document.getElementById('adjustMigrateResult');
+  const targets = invLogs.filter(i => i.type === 'adjust' && i.adjustMode !== 'delta');
+
+  if(targets.length === 0){
+    resultEl.innerHTML = '<div style="color:var(--green);padding:8px">✅ 변환할 항목이 없습니다 (모두 이미 최신 방식)</div>';
+    return;
+  }
+
+  // 미리보기: 변경 전후 총재고 계산
+  const productsSet = new Set(targets.map(t => `${t.company||'AMT'}|${t.product}`));
+  const beforeStock = {};
+  productsSet.forEach(key => {
+    const [company, prod] = key.split('|');
+    beforeStock[key] = calcStock(prod, company);
+  });
+
+  // 가상 변경 (미리보기)
+  if(!previewOnly){
+    targets.forEach(t => { t.adjustMode = 'delta'; t._v = Date.now(); });
+  } else {
+    // 미리보기용 임시 변경
+    targets.forEach(t => { t._previewDelta = true; });
+  }
+
+  // after 계산 (adjustMode='delta' 가정)
+  const afterStock = {};
+  productsSet.forEach(key => {
+    const [company, prod] = key.split('|');
+    let total = 0;
+    const logs = invLogs.filter(i => i.product===prod && (i.company||'AMT')===company)
+      .sort((a,b)=>a.date.localeCompare(b.date)||(a.createdAt||'').localeCompare(b.createdAt||''));
+    logs.forEach(i => {
+      if(i.type === 'adjust'){
+        // 미리보기에서는 _previewDelta 플래그로 판정
+        const isDelta = previewOnly ? !!i._previewDelta : (i.adjustMode === 'delta');
+        if(isDelta) total += i.qty;
+        else total = i.qty;
+      } else {
+        total += i.qty;
+      }
+    });
+    afterStock[key] = total;
+  });
+
+  // 미리보기 임시플래그 제거
+  if(previewOnly){
+    targets.forEach(t => { delete t._previewDelta; });
+  }
+
+  let html = `<div style="font-weight:700;margin-bottom:8px;color:${previewOnly?'var(--blue)':'var(--green)'}">${previewOnly?'🔍 미리보기':'✅ 저장 완료'} - ${targets.length}개 재고조정 이력</div>`;
+  html += '<table style="width:100%;font-size:.72rem;border-collapse:collapse"><thead><tr style="background:#f3f4f6"><th style="padding:6px;text-align:left">회사 · 제품</th><th style="padding:6px;text-align:right">변환 전 재고</th><th style="padding:6px;text-align:right">변환 후 재고</th></tr></thead><tbody>';
+  Array.from(productsSet).forEach(key => {
+    const [company, prod] = key.split('|');
+    const b = beforeStock[key], a = afterStock[key];
+    const diff = a - b;
+    const diffColor = diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--text2)';
+    html += `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:5px 6px"><b>${company}</b> · ${prod}</td>
+      <td style="padding:5px 6px;text-align:right;font-family:monospace">${fmt(b)}</td>
+      <td style="padding:5px 6px;text-align:right;font-family:monospace;font-weight:700;color:${diffColor}">${fmt(a)}${diff!==0?` (${diff>0?'+':''}${fmt(diff)})`:''}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+
+  resultEl.innerHTML = html;
+
+  if(!previewOnly){
+    try{
+      saveLS();
+      await fbSaveAll();
+      toast('✅ 재고조정 계산방식 마이그레이션 완료','success');
+      addAuditLog('edit','재고', `재고조정 계산방식 정정: ${targets.length}개 이력 → delta 모드`);
       refreshAll();
     }catch(e){
       toast('❌ 저장 실패: '+e.message,'error');
