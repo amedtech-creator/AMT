@@ -769,7 +769,9 @@ function getDealerInfo(dealerOrIdOrCode, dealerNameFallback, options) {
 }
 
 // ── 거래명세서 HTML 생성 ─────────────────────────────────────
-function buildStatementHTML(items, dealerName, dealerInfo, orderId) {
+function buildStatementHTML(items, dealerName, dealerInfo, orderId, options) {
+  options = options || {};
+  const displaySerial = options.displaySerial || orderId || ''; // ★ 일련 No로 표시할 값 (나중에 #2에서 사용)
   const today = new Date();
   const dateStr = `${today.getFullYear()}년 ${today.getMonth()+1}월 ${today.getDate()}일`;
   const hasDelivery = items.some(i => i.delivery);
@@ -779,12 +781,12 @@ function buildStatementHTML(items, dealerName, dealerInfo, orderId) {
     const amt = item.qty * item.unitPrice;
     const displayName = PROD_DISPLAY[item.product] || item.product;
     return `<tr>
-      <td style="border:1px solid #aaa;padding:6px 8px;text-align:center;font-size:12px">${i+1}</td>
-      <td style="border:1px solid #aaa;padding:6px 8px;text-align:center;font-size:12px">${item.catNo||''}</td>
-      <td style="border:1px solid #aaa;padding:6px 8px;font-size:12px">${displayName}</td>
-      <td style="border:1px solid #aaa;padding:6px 8px;text-align:center;font-size:12px">${item.qty.toLocaleString()} ea</td>
-      <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${item.unitPrice.toLocaleString()}</td>
-      <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${amt.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:4px 6px;text-align:center;font-size:11px">${i+1}</td>
+      <td style="border:1px solid #aaa;padding:4px 6px;text-align:center;font-size:11px">${item.catNo||''}</td>
+      <td style="border:1px solid #aaa;padding:4px 6px;font-size:11px">${displayName}</td>
+      <td style="border:1px solid #aaa;padding:4px 6px;text-align:center;font-size:11px">${item.qty.toLocaleString()} ea</td>
+      <td style="border:1px solid #aaa;padding:4px 6px;text-align:right;font-size:11px">${item.unitPrice.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:4px 6px;text-align:right;font-size:11px">${amt.toLocaleString()}</td>
     </tr>`;
   }).join('');
 
@@ -793,30 +795,31 @@ function buildStatementHTML(items, dealerName, dealerInfo, orderId) {
     (items.find(i=>i.delivery && i.deliveryFee) || {deliveryFee: dealerInfo.deliveryFee || 3000}).deliveryFee
   ) : 0;
   const deliveryRow = hasDelivery ? `<tr>
-    <td style="border:1px solid #aaa;padding:6px 8px"></td>
-    <td style="border:1px solid #aaa;padding:6px 8px"></td>
-    <td style="border:1px solid #aaa;padding:6px 8px;font-size:12px">택배비</td>
-    <td style="border:1px solid #aaa;padding:6px 8px"></td>
-    <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${deliveryFeeAmt.toLocaleString()}</td>
-    <td style="border:1px solid #aaa;padding:6px 8px;text-align:right;font-size:12px">${deliveryFeeAmt.toLocaleString()}</td>
+    <td style="border:1px solid #aaa;padding:4px 6px"></td>
+    <td style="border:1px solid #aaa;padding:4px 6px"></td>
+    <td style="border:1px solid #aaa;padding:4px 6px;font-size:11px">택배비</td>
+    <td style="border:1px solid #aaa;padding:4px 6px"></td>
+    <td style="border:1px solid #aaa;padding:4px 6px;text-align:right;font-size:11px">${deliveryFeeAmt.toLocaleString()}</td>
+    <td style="border:1px solid #aaa;padding:4px 6px;text-align:right;font-size:11px">${deliveryFeeAmt.toLocaleString()}</td>
   </tr>` : '';
 
-  const emptyCount = Math.max(0, 15 - items.length - (hasDelivery ? 1 : 0));
+  // ★ 빈 행 축소: 15 → 6 (인쇄 1페이지 맞춤)
+  const emptyCount = Math.max(0, 6 - items.length - (hasDelivery ? 1 : 0));
   const emptyRows = Array(emptyCount).fill(`<tr>
-    <td style="border:1px solid #aaa;padding:5px 8px;height:22px"></td>
+    <td style="border:1px solid #aaa;padding:3px 6px;height:18px"></td>
     <td style="border:1px solid #aaa"></td><td style="border:1px solid #aaa"></td>
     <td style="border:1px solid #aaa"></td>
-    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
-    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
+    <td style="border:1px solid #aaa;text-align:right;padding:3px 6px;font-size:10px;color:#bbb">-</td>
+    <td style="border:1px solid #aaa;text-align:right;padding:3px 6px;font-size:10px;color:#bbb">-</td>
   </tr>`).join('');
 
   const blankRow = `<tr>
-    <td style="border:1px solid #aaa;padding:5px 8px"></td>
+    <td style="border:1px solid #aaa;padding:3px 6px"></td>
     <td style="border:1px solid #aaa"></td>
-    <td style="border:1px solid #aaa;text-align:center;font-size:11px;color:#999;padding:5px 8px">***** 이 하 여 백 *****</td>
+    <td style="border:1px solid #aaa;text-align:center;font-size:10px;color:#999;padding:3px 6px">***** 이 하 여 백 *****</td>
     <td style="border:1px solid #aaa"></td>
-    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
-    <td style="border:1px solid #aaa;text-align:right;padding:5px 8px;font-size:11px;color:#bbb">-</td>
+    <td style="border:1px solid #aaa;text-align:right;padding:3px 6px;font-size:10px;color:#bbb">-</td>
+    <td style="border:1px solid #aaa;text-align:right;padding:3px 6px;font-size:10px;color:#bbb">-</td>
   </tr>`;
 
   const total      = items.reduce((s,i) => s + i.qty * i.unitPrice, 0) + (hasDelivery ? deliveryFeeAmt : 0);
@@ -824,64 +827,72 @@ function buildStatementHTML(items, dealerName, dealerInfo, orderId) {
   const vatAmt     = total - supplyAmt;
 
   // 사업자주소 라벨: "사업자" 아래 "주소" 두 줄
-  const addrLbl = `<span style="display:block;line-height:1.5">사업자</span><span style="display:block;line-height:1.5">주소</span>`;
+  const addrLbl = `<span style="display:block;line-height:1.3">사업자</span><span style="display:block;line-height:1.3">주소</span>`;
 
-  return `<div style="font-family:'맑은 고딕',Arial,sans-serif;max-width:720px;margin:0 auto;padding:28px 32px;color:#111;background:#fff">
-  <h2 style="text-align:center;font-size:26px;letter-spacing:14px;margin:0 0 20px;padding-bottom:14px;border-bottom:2px solid #111;font-weight:normal">거 래 명 세 서</h2>
-  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">
+  // ★ 인쇄 1페이지 최적화: @page 여백 축소 + page-break 회피
+  return `<style>
+    @media print {
+      @page { size: A4; margin: 10mm 12mm; }
+      .ky-statement { page-break-inside: avoid !important; }
+      body { margin: 0 !important; }
+    }
+  </style>
+  <div class="ky-statement" style="font-family:'맑은 고딕',Arial,sans-serif;max-width:720px;margin:0 auto;padding:14px 20px;color:#111;background:#fff;page-break-inside:avoid">
+  <h2 style="text-align:center;font-size:22px;letter-spacing:12px;margin:0 0 12px;padding-bottom:10px;border-bottom:2px solid #111;font-weight:normal">거 래 명 세 서</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:10px">
     <tr>
-      <td style="width:12px;vertical-align:middle;font-size:10px;line-height:2;color:#555;text-align:center;padding:0 2px">공<br>급<br>자</td>
+      <td style="width:12px;vertical-align:middle;font-size:9px;line-height:1.6;color:#555;text-align:center;padding:0 2px">공<br>급<br>자</td>
       <td style="vertical-align:top;width:44%">
         <table style="width:100%;border-collapse:collapse">
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;width:52px;font-size:11px;color:#555;white-space:nowrap">등록번호</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${KY_SUPPLIER.regNo}</td></tr>
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">상 호</td><td style="border:1px solid #aaa;padding:5px 7px;font-weight:bold;font-size:11px">${KY_SUPPLIER.name}</td></tr>
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">대표자명</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${KY_SUPPLIER.ceo}</td></tr>
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555;vertical-align:top">${addrLbl}</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${KY_SUPPLIER.address}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;width:52px;font-size:10px;color:#555;white-space:nowrap">등록번호</td><td style="border:1px solid #aaa;padding:3px 6px;font-size:10px">${KY_SUPPLIER.regNo}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;font-size:10px;color:#555">상 호</td><td style="border:1px solid #aaa;padding:3px 6px;font-weight:bold;font-size:10px">${KY_SUPPLIER.name}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;font-size:10px;color:#555">대표자명</td><td style="border:1px solid #aaa;padding:3px 6px;font-size:10px">${KY_SUPPLIER.ceo}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;font-size:10px;color:#555;vertical-align:top">${addrLbl}</td><td style="border:1px solid #aaa;padding:3px 6px;font-size:10px">${KY_SUPPLIER.address}</td></tr>
         </table>
       </td>
-      <td style="width:10px"></td>
-      <td style="width:12px;vertical-align:middle;font-size:10px;line-height:2;color:#555;text-align:center;padding:0 2px">공<br>급<br><br>받<br>는<br>자</td>
+      <td style="width:8px"></td>
+      <td style="width:12px;vertical-align:middle;font-size:9px;line-height:1.6;color:#555;text-align:center;padding:0 2px">공<br>급<br><br>받<br>는<br>자</td>
       <td style="vertical-align:top">
         <table style="width:100%;border-collapse:collapse">
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;width:52px;font-size:11px;color:#555;white-space:nowrap">등록번호</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${dealerInfo.regNo||''}</td></tr>
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">상 호</td><td style="border:1px solid #aaa;padding:5px 7px;font-weight:bold;font-size:11px">${dealerName}</td></tr>
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555">대표자명</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${dealerInfo.ceo||''}</td></tr>
-          <tr><td style="border:1px solid #aaa;padding:5px 7px;background:#f5f5f5;font-size:11px;color:#555;vertical-align:top">${addrLbl}</td><td style="border:1px solid #aaa;padding:5px 7px;font-size:11px">${dealerInfo.address||''}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;width:52px;font-size:10px;color:#555;white-space:nowrap">등록번호</td><td style="border:1px solid #aaa;padding:3px 6px;font-size:10px">${dealerInfo.regNo||''}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;font-size:10px;color:#555">상 호</td><td style="border:1px solid #aaa;padding:3px 6px;font-weight:bold;font-size:10px">${dealerName}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;font-size:10px;color:#555">대표자명</td><td style="border:1px solid #aaa;padding:3px 6px;font-size:10px">${dealerInfo.ceo||''}</td></tr>
+          <tr><td style="border:1px solid #aaa;padding:3px 6px;background:#f5f5f5;font-size:10px;color:#555;vertical-align:top">${addrLbl}</td><td style="border:1px solid #aaa;padding:3px 6px;font-size:10px">${dealerInfo.address||''}</td></tr>
         </table>
       </td>
     </tr>
   </table>
-  <table style="width:100%;font-size:11px;margin-bottom:6px">
-    <tr><td>일련 No : <strong>${orderId||''}</strong></td><td style="text-align:center">발행일자 : ${dateStr}</td><td style="text-align:right">Page : 1</td></tr>
+  <table style="width:100%;font-size:10px;margin-bottom:4px">
+    <tr><td>일련 No : <strong>${displaySerial}</strong></td><td style="text-align:center">발행일자 : ${dateStr}</td><td style="text-align:right">Page : 1</td></tr>
   </table>
-  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:0">
+  <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:0">
     <thead><tr style="background:#f2f2f2">
-      <th style="border:1px solid #aaa;padding:7px 5px;width:28px">순위</th>
-      <th style="border:1px solid #aaa;padding:7px 5px;width:82px">Code<br>Cat-No.</th>
-      <th style="border:1px solid #aaa;padding:7px 5px">품 명 / Description</th>
-      <th style="border:1px solid #aaa;padding:7px 5px;width:66px">수량<br>Quantity</th>
-      <th style="border:1px solid #aaa;padding:7px 5px;width:84px">단가<br>Unit Price</th>
-      <th style="border:1px solid #aaa;padding:7px 5px;width:96px">금액<br>Amount</th>
+      <th style="border:1px solid #aaa;padding:5px 4px;width:28px;font-size:10px">순위</th>
+      <th style="border:1px solid #aaa;padding:5px 4px;width:80px;font-size:10px">Code<br>Cat-No.</th>
+      <th style="border:1px solid #aaa;padding:5px 4px;font-size:10px">품 명 / Description</th>
+      <th style="border:1px solid #aaa;padding:5px 4px;width:62px;font-size:10px">수량<br>Quantity</th>
+      <th style="border:1px solid #aaa;padding:5px 4px;width:82px;font-size:10px">단가<br>Unit Price</th>
+      <th style="border:1px solid #aaa;padding:5px 4px;width:94px;font-size:10px">금액<br>Amount</th>
     </tr></thead>
     <tbody>${rows}${deliveryRow}${blankRow}${emptyRows}</tbody>
   </table>
-  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
+  <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:6px">
     <tr>
-      <td style="border:1px solid #aaa;padding:7px 10px;width:28px"></td>
-      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold;width:82px"></td>
-      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold">매 출 액</td>
-      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold">부가가치세</td>
-      <td style="border:1px solid #aaa;padding:7px 10px;text-align:center;font-weight:bold">합 계</td>
+      <td style="border:1px solid #aaa;padding:5px 8px;width:28px"></td>
+      <td style="border:1px solid #aaa;padding:5px 8px;text-align:center;font-weight:bold;width:80px"></td>
+      <td style="border:1px solid #aaa;padding:5px 8px;text-align:center;font-weight:bold">매 출 액</td>
+      <td style="border:1px solid #aaa;padding:5px 8px;text-align:center;font-weight:bold">부가가치세</td>
+      <td style="border:1px solid #aaa;padding:5px 8px;text-align:center;font-weight:bold">합 계</td>
     </tr>
     <tr>
-      <td style="border:1px solid #aaa;padding:7px 10px"></td>
-      <td style="border:1px solid #aaa;padding:7px 10px"></td>
-      <td style="border:1px solid #aaa;padding:7px 10px;text-align:right;font-weight:bold">${supplyAmt.toLocaleString()}</td>
-      <td style="border:1px solid #aaa;padding:7px 10px;text-align:right;font-weight:bold">${vatAmt.toLocaleString()}</td>
-      <td style="border:1px solid #aaa;padding:7px 10px;text-align:right;font-weight:bold">${total.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:5px 8px"></td>
+      <td style="border:1px solid #aaa;padding:5px 8px"></td>
+      <td style="border:1px solid #aaa;padding:5px 8px;text-align:right;font-weight:bold">${supplyAmt.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:5px 8px;text-align:right;font-weight:bold">${vatAmt.toLocaleString()}</td>
+      <td style="border:1px solid #aaa;padding:5px 8px;text-align:right;font-weight:bold">${total.toLocaleString()}</td>
     </tr>
   </table>
-  <p style="font-size:11px;color:#999;border-top:1px solid #ddd;padding-top:10px;margin:0;text-align:center">
+  <p style="font-size:9px;color:#999;border-top:1px solid #ddd;padding-top:6px;margin:0;text-align:center">
     본 명세서는 ㈜케이와이메디칼에서 자동 발송된 문서입니다. &nbsp;|&nbsp; 문의: amedtech@gmail.com
   </p>
 </div>`;
@@ -1010,6 +1021,45 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
     toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
   }
 }
+
+// ★ 다제품 발주용: 그룹 전체를 한 장의 명세서로 발송
+async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryFee) {
+  try {
+    const hasFeeAuto = (groupOrder.fee || 0) > 0;
+    const includeFee = (includeDeliveryFee === undefined || includeDeliveryFee === null)
+      ? hasFeeAuto
+      : !!includeDeliveryFee;
+
+    const info = getDealerInfo(dealer, dealer.name, { includeDeliveryFee: includeFee });
+    if(!info || !info.email){
+      console.warn('거래명세서: 대리점 정보/이메일 없음 →', dealer.name);
+      toast('⚠️ '+dealer.name+' 정보 없음 - 명세서 미발송','error');
+      return;
+    }
+
+    // 각 제품을 items 배열에 순서대로 쌓고, 택배비는 "첫 번째 제품" 에만 연결
+    const items = (groupOrder.items || []).map((it, idx) => {
+      const pd = info.products[it.product] || {};
+      return {
+        product:   it.product,
+        catNo:     pd.catNo || '',
+        qty:       Math.abs(it.qty),
+        unitPrice: it.price || pd.price || 0,
+        delivery:  includeFee && idx === 0 && hasFeeAuto,
+        deliveryFee: (includeFee && idx === 0) ? (pd.deliveryFee || info._fee || 0) : 0
+      };
+    });
+
+    if(!items.length){ toast('⚠️ 그룹 주문에 제품이 없습니다','error'); return; }
+
+    const html = buildStatementHTML(items, dealer.name, info, groupOrder.id);
+    await sendStatementEmail(dealer.name, info.email, groupOrder.id, html);
+    console.log('✅ 거래명세서 발송 완료 (다제품 그룹) →', info.email, items.length+'개 품목');
+  } catch(e) {
+    console.error('거래명세서 발송 실패 (그룹):', e);
+    toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
+  }
+}
 </script>
 <body>
 
@@ -1105,33 +1155,21 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
         <label>발주일 <span class="req">*</span></label>
         <input type="date" id="oDate" onchange="oCalc()">
       </div>
-      <div class="form-group">
+      <div class="form-group" style="flex:2">
         <label>대리점 <span class="req">*</span></label>
         <select id="oDealer" onchange="oOnDealer()">
           <option value="">-- 대리점 선택 --</option>
         </select>
       </div>
-      <div class="form-group">
-        <label>제품 <span class="req">*</span></label>
-        <select id="oProduct" onchange="oOnProduct()">
-          <option value="">-- 제품 선택 --</option>
-        </select>
-      </div>
     </div>
-    <div class="form-grid">
-      <div class="form-group">
-        <label>수량 <span class="req">*</span></label>
-        <input type="text" inputmode="numeric" id="oQty" min="1" placeholder="0" oninput="fmtInput(this);oCalcTotal()">
-      </div>
-      <div class="form-group">
-        <label>단가 (VAT포함)</label>
-        <input type="text" inputmode="numeric" id="oPrice" placeholder="자동" oninput="fmtInput(this);oCalcTotal()">
-      </div>
-      <div class="form-group">
-        <label>합계금액</label>
-        <input type="text" id="oTotal" readonly="">
-      </div>
+
+    <!-- ★ 다제품 입력 영역 -->
+    <div id="oProductRows" style="margin-top:6px"></div>
+    <div style="margin:8px 0 12px">
+      <button type="button" class="btn btn-outline btn-sm" onclick="addOrderProductRow()">+ 제품 추가</button>
+      <span style="font-size:.72rem;color:var(--text3);margin-left:8px">여러 제품을 한 번에 주문하면 거래명세서가 한 장으로 발송됩니다</span>
     </div>
+
     <div class="form-grid">
       <div class="form-group">
         <label>수금예정일 <span style="font-size:.68rem;color:var(--text3)">(자동계산)</span></label>
@@ -1143,7 +1181,7 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
       </div>
       <div class="form-group" id="oFeeIncludeGroup" style="display:none">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding-top:22px">
-          <input type="checkbox" id="oFeeInclude" checked style="width:auto;margin:0">
+          <input type="checkbox" id="oFeeInclude" checked style="width:auto;margin:0" onchange="oCalcGrandTotal()">
           <span style="font-size:.82rem">택배비 포함 명세서</span>
         </label>
         <span style="font-size:.7rem;color:var(--text3);margin-top:3px;display:block">체크 시 택배비 포함 명세서 발송</span>
@@ -1151,6 +1189,10 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
       <div class="form-group">
         <label>메모</label>
         <input type="text" id="oMemo" placeholder="선택사항">
+      </div>
+      <div class="form-group">
+        <label>총 합계금액</label>
+        <input type="text" id="oGrandTotal" readonly="" style="font-weight:700;color:var(--blue)">
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
@@ -2808,6 +2850,11 @@ function refreshAll(){
   // ★ Fix: 대리점관리↔설정 양방향 자동 동기화
   const wrap = document.getElementById('dealerCodeListWrap');
   if(wrap && wrap.offsetParent !== null) renderDealerCodeList(dealers);
+  // ★ 발주입력: 제품 행이 하나도 없으면 기본 행 1개 추가
+  const productRowsWrap = document.getElementById('oProductRows');
+  if(productRowsWrap && productRowsWrap.children.length === 0){
+    addOrderProductRow();
+  }
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -2817,29 +2864,35 @@ function populateSelects(){
   // 발주 - 대리점
   const oDealer=document.getElementById('oDealer');
   const cv=oDealer.value;
-  const curProd=document.getElementById('oProduct').value; // 현재 선택된 제품 기억
   oDealer.innerHTML='<option value="">-- 대리점 선택 --</option>';
   dealers.forEach(d=>{ const o=document.createElement('option'); o.value=d.id; o.textContent=d.name; if(d.id===cv) o.selected=true; oDealer.appendChild(o); });
 
-  // 대리점이 이미 선택돼 있으면 제품 목록 즉시 갱신 (단가 변경 반영)
+  // ★ 다제품 행들의 제품 드롭다운 갱신
   if(cv){
     const d=getDealerById(cv);
-    const pEl=document.getElementById('oProduct');
-    pEl.innerHTML='<option value="">-- 제품 선택 --</option>';
-    if(d){
-      d.products.forEach(p=>{ const o=document.createElement('option'); o.value=p.product; o.textContent=p.product; if(p.product===curProd) o.selected=true; pEl.appendChild(o); });
+    const wrap=document.getElementById('oProductRows');
+    if(wrap && d){
+      wrap.querySelectorAll('.op-prod').forEach(sel => {
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">-- 제품 선택 --</option>';
+        d.products.forEach(p => {
+          const o = document.createElement('option');
+          o.value = p.product;
+          o.textContent = p.product;
+          if(p.product === cur) o.selected = true;
+          sel.appendChild(o);
+        });
+      });
       document.getElementById('oFeeGroup').style.display=d.fee>0?'block':'none';
       document.getElementById('oFeeIncludeGroup').style.display=d.fee>0?'block':'none';
       document.getElementById('oFee').value=d.fee||0;
-      // 제품도 선택돼 있으면 단가 자동 갱신
-      if(curProd && d.products.find(p=>p.product===curProd)){
-        const orderDate=document.getElementById('oDate').value;
-        if(orderDate){
-          const price=getPrice(d,curProd,orderDate);
-          setInputFmt(document.getElementById('oPrice'), price);
-          oCalcTotal();
-          document.getElementById('oDue').value=calcDue(orderDate,d.term,cv);
-        }
+      // 선택된 제품이 있으면 단가 재계산
+      const orderDate=document.getElementById('oDate').value;
+      if(orderDate){
+        wrap.querySelectorAll('.form-grid').forEach(row => {
+          const prodEl = row.querySelector('.op-prod');
+          if(prodEl && prodEl.value) oRowOnProduct(row.id);
+        });
       }
     }
   }
@@ -2873,38 +2926,171 @@ function populateSelects(){
 /* ═══════════════════════════════════════════════════════
    ORDER INPUT
 ═══════════════════════════════════════════════════════ */
-function oOnDealer(){
-  const d=getDealerById(document.getElementById('oDealer').value);
-  const pEl=document.getElementById('oProduct');
-  pEl.innerHTML='<option value="">-- 제품 선택 --</option>';
-  if(!d) return;
-  d.products.forEach(p=>{ const o=document.createElement('option'); o.value=p.product; o.textContent=p.product; pEl.appendChild(o); });
-  document.getElementById('oFeeGroup').style.display=d.fee>0?'block':'none';
-  document.getElementById('oFeeIncludeGroup').style.display=d.fee>0?'block':'none';
-  document.getElementById('oFee').value=d.fee||0;
-  oOnProduct();
+/* ═══════════════════════════════════════════════════════
+   다제품 발주 입력 (#4)
+   - 제품 행을 여러 개 추가할 수 있음
+   - 저장 시 각 제품마다 별도 order 객체 생성하되 orderGroupId로 묶음
+   - 거래명세서는 그룹 단위로 1장 발송
+═══════════════════════════════════════════════════════ */
+let _orderRowSeq = 0;
+
+function addOrderProductRow(presetProd, presetQty, presetPrice){
+  const wrap = document.getElementById('oProductRows');
+  if(!wrap) return;
+  const dealerId = document.getElementById('oDealer').value;
+  const d = dealerId ? getDealerById(dealerId) : null;
+  const orderDate = document.getElementById('oDate').value;
+
+  const rowId = 'oRow_' + (++_orderRowSeq);
+  const row = document.createElement('div');
+  row.id = rowId;
+  row.className = 'form-grid';
+  row.style.cssText = 'align-items:flex-end;padding:10px;background:var(--gray-light);border-radius:8px;margin-bottom:8px;position:relative';
+
+  // 제품 옵션 생성
+  const productOptions = d
+    ? '<option value="">-- 제품 선택 --</option>' +
+      d.products.map(p => `<option value="${p.product}"${p.product===presetProd?' selected':''}>${p.product}</option>`).join('')
+    : '<option value="">-- 대리점 먼저 선택 --</option>';
+
+  row.innerHTML = `
+    <div class="form-group">
+      <label>제품 <span class="req">*</span></label>
+      <select class="op-prod" onchange="oRowOnProduct('${rowId}')">
+        ${productOptions}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>수량 <span class="req">*</span></label>
+      <input type="text" inputmode="numeric" class="op-qty" min="1" placeholder="0" value="${presetQty||''}" oninput="fmtInput(this);oRowCalcTotal('${rowId}')">
+    </div>
+    <div class="form-group">
+      <label>단가 (VAT포함)</label>
+      <input type="text" inputmode="numeric" class="op-price" placeholder="자동" value="${presetPrice?Number(presetPrice).toLocaleString('ko-KR'):''}" oninput="fmtInput(this);oRowCalcTotal('${rowId}')">
+    </div>
+    <div class="form-group">
+      <label>합계</label>
+      <input type="text" class="op-total" readonly style="background:#fff">
+    </div>
+    <div class="form-group w-auto">
+      <button type="button" class="btn btn-danger btn-xs" onclick="removeOrderProductRow('${rowId}')" style="margin-top:18px" title="이 제품 제거">✕</button>
+    </div>
+  `;
+  wrap.appendChild(row);
+
+  // preset 처리
+  if(presetProd && d){
+    oRowOnProduct(rowId);
+  } else {
+    oRowCalcTotal(rowId);
+  }
+  oCalcGrandTotal();
 }
 
-function oOnProduct(){
-  const dealerId=document.getElementById('oDealer').value;
-  const product=document.getElementById('oProduct').value;
-  const orderDate=document.getElementById('oDate').value;
-  if(!dealerId||!product||!orderDate) return;
-  const d=getDealerById(dealerId);
-  const price=getPrice(d,product,orderDate);
-  setInputFmt(document.getElementById('oPrice'), price);
-  oCalcTotal();
-  document.getElementById('oDue').value=calcDue(orderDate,d.term,dealerId);
+function removeOrderProductRow(rowId){
+  const row = document.getElementById(rowId);
+  if(row){
+    // 마지막 1개는 남겨둠 (최소 하나는 있어야 함)
+    const wrap = document.getElementById('oProductRows');
+    if(wrap && wrap.children.length <= 1){
+      toast('최소 1개 이상의 제품이 필요합니다','error');
+      return;
+    }
+    row.remove();
+    oCalcGrandTotal();
+  }
+}
+
+function oRowOnProduct(rowId){
+  const row = document.getElementById(rowId);
+  if(!row) return;
+  const prodEl = row.querySelector('.op-prod');
+  const priceEl = row.querySelector('.op-price');
+  const product = prodEl.value;
+  const dealerId = document.getElementById('oDealer').value;
+  const orderDate = document.getElementById('oDate').value;
+  if(!dealerId || !product || !orderDate) return;
+  const d = getDealerById(dealerId);
+  const price = getPrice(d, product, orderDate);
+  setInputFmt(priceEl, price);
+  oRowCalcTotal(rowId);
+  document.getElementById('oDue').value = calcDue(orderDate, d.term, dealerId);
+}
+
+function oRowCalcTotal(rowId){
+  const row = document.getElementById(rowId);
+  if(!row) return;
+  const q = parseInput(row.querySelector('.op-qty'));
+  const p = parseInput(row.querySelector('.op-price'));
+  setInputFmt(row.querySelector('.op-total'), q * p);
+  oCalcGrandTotal();
+}
+
+function oCalcGrandTotal(){
+  const wrap = document.getElementById('oProductRows');
+  if(!wrap) return;
+  let sum = 0;
+  wrap.querySelectorAll('.form-grid').forEach(row => {
+    const q = parseInput(row.querySelector('.op-qty'));
+    const p = parseInput(row.querySelector('.op-price'));
+    sum += q * p;
+  });
+  // 택배비 포함 여부에 따라 표시
+  const feeIncludeGroup = document.getElementById('oFeeIncludeGroup');
+  const feeIncludeEl = document.getElementById('oFeeInclude');
+  const feeVisible = feeIncludeGroup && feeIncludeGroup.style.display !== 'none';
+  const feeChecked = feeIncludeEl && feeIncludeEl.checked;
+  const feeVal = parseInt(document.getElementById('oFee')?.value) || 0;
+  const grand = sum + (feeVisible && feeChecked ? feeVal : 0);
+  const grandEl = document.getElementById('oGrandTotal');
+  if(grandEl) setInputFmt(grandEl, grand);
+}
+
+function oOnDealer(){
+  const d=getDealerById(document.getElementById('oDealer').value);
+  // 모든 제품 행의 드롭다운 갱신
+  const wrap = document.getElementById('oProductRows');
+  if(wrap){
+    wrap.querySelectorAll('.op-prod').forEach(sel => {
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">-- 제품 선택 --</option>';
+      if(d){
+        d.products.forEach(p => {
+          const o = document.createElement('option');
+          o.value = p.product;
+          o.textContent = p.product;
+          if(p.product === cur) o.selected = true;
+          sel.appendChild(o);
+        });
+      }
+    });
+  }
+  document.getElementById('oFeeGroup').style.display = d && d.fee>0 ? 'block' : 'none';
+  document.getElementById('oFeeIncludeGroup').style.display = d && d.fee>0 ? 'block' : 'none';
+  if(d) document.getElementById('oFee').value = d.fee||0;
+  // 각 행 단가/합계 재계산
+  if(wrap){
+    wrap.querySelectorAll('.form-grid').forEach(row => oRowOnProduct(row.id));
+  }
+  oCalcGrandTotal();
 }
 
 function oCalc(){
-  oOnProduct();
+  // 발주일 변경 시 모든 행 재계산
+  const wrap = document.getElementById('oProductRows');
+  if(wrap){
+    wrap.querySelectorAll('.form-grid').forEach(row => oRowOnProduct(row.id));
+  }
+  oCalcGrandTotal();
 }
 
-function oCalcTotal(){
-  const q=parseInput(document.getElementById('oQty'));
-  const p=parseInput(document.getElementById('oPrice'));
-  setInputFmt(document.getElementById('oTotal'), q*p);
+// ★ 발주 입력 초기화 (신규 발주 폼 상태로)
+function resetOrderForm(){
+  const wrap = document.getElementById('oProductRows');
+  if(wrap) wrap.innerHTML = '';
+  addOrderProductRow(); // 기본 1줄 추가
+  document.getElementById('oMemo').value = '';
+  oCalcGrandTotal();
 }
 
 let _savingOrder = false;
@@ -2923,107 +3109,180 @@ async function saveOrder(){
 async function _doSaveOrder(){
   const orderDate=document.getElementById('oDate').value;
   const dealerId=document.getElementById('oDealer').value;
-  const product=document.getElementById('oProduct').value;
-  const qty=parseInput(document.getElementById('oQty'));
-  const price=parseInput(document.getElementById('oPrice'));
   const memo=document.getElementById('oMemo').value;
   const dealer=getDealerById(dealerId);
 
-  if(!orderDate||!dealerId||!product||qty<=0){ toast('필수 항목을 입력하세요','error'); return; }
+  if(!orderDate||!dealerId){ toast('발주일과 대리점을 선택하세요','error'); return; }
+  if(!dealer){ toast('대리점을 찾을 수 없습니다','error'); return; }
 
-  const total=qty*price;
+  // ★ 다제품 행 수집
+  const wrap = document.getElementById('oProductRows');
+  const rows = wrap ? wrap.querySelectorAll('.form-grid') : [];
+  if(!rows.length){ toast('제품을 1개 이상 추가하세요','error'); return; }
+
+  const items = [];
+  for(const row of rows){
+    const product = row.querySelector('.op-prod').value;
+    const qty = parseInput(row.querySelector('.op-qty'));
+    const price = parseInput(row.querySelector('.op-price'));
+    if(!product){ toast('제품을 모두 선택하세요','error'); return; }
+    if(qty <= 0){ toast(`${product}: 수량을 입력하세요`,'error'); return; }
+    if(price <= 0){ toast(`${product}: 단가를 입력하세요`,'error'); return; }
+    items.push({ product, qty, price, total: qty*price });
+  }
+
+  // 중복 제품 확인
+  const productSet = new Set();
+  for(const it of items){
+    if(productSet.has(it.product)){
+      toast(`"${it.product}"이(가) 중복됐습니다. 행을 합치거나 제거해주세요`,'error');
+      return;
+    }
+    productSet.add(it.product);
+  }
+
   const dueDate=calcDue(orderDate,dealer.term,dealerId);
   const fee=dealer.fee>0?parseInt(document.getElementById('oFee').value)||0:0;
 
-  const order={
-    id:'ord_'+Date.now(),
-    orderDate, dealerId, dealerName:dealer.name,
-    product, qty, price, total, dueDate, fee, memo,
-    status:'pending', createdAt:new Date().toISOString(),
-    relKyProduct: product
-  };
+  // ★ 그룹 ID: 여러 제품이 하나의 발주로 묶이도록
+  const groupId = 'grp_' + Date.now();
+  const baseTime = Date.now();
+  const createdOrders = [];
+  const createdInvIds = [];
 
-  orders.push(order);
-  addAuditLog('create','발주',`${order.dealerName} ${order.product} ${fmt(order.qty)}개 ${fmt(order.total)}원 (발주일:${order.orderDate})`);
+  // 각 제품마다 order 생성 (하위호환 유지)
+  // fee는 첫 번째 order에만 붙임 (중복 합산 방지)
+  items.forEach((it, idx) => {
+    const order = {
+      id: 'ord_' + baseTime + '_' + idx,
+      orderGroupId: groupId, // ★ 같은 발주 그룹
+      orderDate,
+      dealerId,
+      dealerName: dealer.name,
+      product: it.product,
+      qty: it.qty,
+      price: it.price,
+      total: it.total,
+      dueDate,
+      fee: idx === 0 ? fee : 0, // 택배비는 첫 번째 주문에만
+      memo,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      relKyProduct: it.product
+    };
+    orders.push(order);
+    createdOrders.push(order);
+    addAuditLog('create','발주',
+      `${order.dealerName} ${order.product} ${fmt(order.qty)}개 ${fmt(order.total)}원 (발주일:${order.orderDate})${items.length>1?' [그룹]':''}`);
 
-  const invId = 'inv_'+Date.now();
-  invLogs.push({
-    id:invId, date:orderDate,
-    product, qty:-qty, type:'out',
-    company:'KY',
-    memo:`발주출고-${dealer.name}`, relOrder:order.id,
-    relKyProduct: product,
-    createdAt:new Date().toISOString()
+    // 재고이력 (KY 출고)
+    const invId = 'inv_' + baseTime + '_' + idx;
+    invLogs.push({
+      id: invId,
+      date: orderDate,
+      product: it.product,
+      qty: -it.qty,
+      type: 'out',
+      company: 'KY',
+      memo: `발주출고-${dealer.name}${items.length>1?' (다제품)':''}`,
+      relOrder: order.id,
+      relKyProduct: it.product,
+      createdAt: new Date().toISOString()
+    });
+    createdInvIds.push(invId);
   });
 
   saveLS();
   await fbSaveAll();
 
+  // ★ KY주문 연동 (그룹 전체를 하나의 KY주문으로 등록)
   const fb = window._fb;
   if(fb && fb.ready){
     try{
-      const kyOrderId = 'ky_from_amt_' + order.id;
+      const kyOrderId = 'ky_from_amt_' + groupId;
       const nowIso = new Date().toISOString();
       const kyOrder = {
         id: kyOrderId,
-        dealerId: order.dealerId,
-        dealerName: order.dealerName,
-        dealerEmail: (dealer.email||'').toLowerCase(),  // ★ 대리점 필터링용
-        items: [{
-          product: order.product,
-          qty: order.qty,
-          price: order.price,
-          total: order.total,
-          relAmtOrder: order.id,
-          relKyProduct: order.product,
+        dealerId,
+        dealerName: dealer.name,
+        dealerEmail: (dealer.email||'').toLowerCase(),
+        items: createdOrders.map(o => ({
+          product: o.product,
+          qty: o.qty,
+          price: o.price,
+          total: o.total,
+          relAmtOrder: o.id,
+          relKyProduct: o.product,
           source: 'amt_order'
-        }],
-        total: order.total + (order.fee||0),
-        totalQty: order.qty,
+        })),
+        total: createdOrders.reduce((s,o)=>s+o.total,0) + fee,
+        totalQty: createdOrders.reduce((s,o)=>s+o.qty,0),
         orderType: 'order',
-        orderDate: order.orderDate,
+        orderDate,
         status: 'shipped',
-        statusNote: 'AMT 직접 발주 입력',
+        statusNote: 'AMT 직접 발주 입력' + (items.length>1?' (다제품)':''),
         statusUpdatedAt: nowIso,
         updatedAt: nowIso,
-        memo: order.memo||'',
-        createdAt: order.createdAt,
+        memo: memo||'',
+        createdAt: nowIso,
         processedBy: window._amtAdminName||'─',
         fromAmt: true,
-        relAmtOrder: order.id,
-        movedToHistoryAt: nowIso  // ★ 바로 히스토리 처리
+        relAmtOrderGroupId: groupId,
+        movedToHistoryAt: nowIso
       };
-      // ★ 바로 히스토리에 저장 (대리점에 "출고완료"로 표시)
       await fb.set(fb.ref(fb.db,'ky_orders_history/'+kyOrderId), kyOrder);
-      await markKyMutation('create_from_amt', kyOrderId, { relAmtOrder: order.id, dealerId: order.dealerId });
-      order.relKyOrder = kyOrderId;
-      order.relKyProduct = product;
-      const linkedInv = invLogs.find(i=>i.id===invId);
-      if(linkedInv){
-        linkedInv.relKyOrder = kyOrderId;
-        linkedInv.relKyProduct = product;
-      }
+      await markKyMutation('create_from_amt', kyOrderId, { relAmtOrderGroupId: groupId, dealerId });
+      // 각 order에 연동정보
+      createdOrders.forEach(o => {
+        o.relKyOrder = kyOrderId;
+      });
+      createdInvIds.forEach(invId => {
+        const linkedInv = invLogs.find(i => i.id === invId);
+        if(linkedInv) linkedInv.relKyOrder = kyOrderId;
+      });
       await fbSaveAll();
     }catch(e){ console.warn('KY주문 자동등록 실패:', e); }
   }
 
-  // ★ 거래명세서 자동 이메일 발송 (발주저장 시)
-  // 택배비 포함 여부: 체크박스 값 사용 (대리점에 fee가 있을 때만 체크박스 노출됨)
+  // ★ 거래명세서 자동 이메일 발송 (그룹 단위로 1장)
   const feeIncludeEl = document.getElementById('oFeeInclude');
   const feeIncludeGroup = document.getElementById('oFeeIncludeGroup');
   const includeDeliveryFee = (feeIncludeGroup && feeIncludeGroup.style.display !== 'none')
     ? (feeIncludeEl ? feeIncludeEl.checked : false)
-    : undefined; // 체크박스 숨김이면 자동 판단
-  sendStatementOnAmtOrder(order, dealer, includeDeliveryFee).catch(()=>{});
+    : undefined;
 
-  // ★ 전자세금계산서 반자동 — 데이터 팝업
-  try { openTaxModal(buildTaxDataFromAmtOrder(order, dealer, includeDeliveryFee)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
+  // ★ 대표 order 객체: 그룹 전체를 하나의 발주로 표현
+  const groupOrder = {
+    id: groupId,
+    orderGroupId: groupId,
+    orderDate,
+    dealerId,
+    dealerName: dealer.name,
+    items: createdOrders.map(o => ({
+      product: o.product,
+      qty: o.qty,
+      price: o.price,
+      total: o.total
+    })),
+    total: createdOrders.reduce((s,o)=>s+o.total,0),
+    totalQty: createdOrders.reduce((s,o)=>s+o.qty,0),
+    fee,
+    memo
+  };
+  sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryFee).catch(()=>{});
 
-  toast(`발주 저장 완료 ✓ 수금예정: ${dueDate}`,'success');
-  document.getElementById('oMsg').textContent=`저장됨 · 수금예정 ${dueDate}`;
+  // ★ 전자세금계산서 데이터 팝업 (그룹 단위)
+  try { openTaxModal(buildTaxDataFromAmtOrderGroup(groupOrder, dealer, includeDeliveryFee)); } catch(e) { console.warn('세금계산서 모달 오류:', e); }
+
+  const itemSummary = items.length === 1
+    ? `${items[0].product} ${fmt(items[0].qty)}개`
+    : `${items.length}개 제품 · 총 ${fmt(items.reduce((s,i)=>s+i.qty,0))}개`;
+  toast(`발주 저장 완료 ✓ ${itemSummary} · 수금예정 ${dueDate}`,'success');
+  document.getElementById('oMsg').textContent=`저장됨 · ${itemSummary} · 수금예정 ${dueDate}`;
   setTimeout(()=>document.getElementById('oMsg').textContent='',4000);
-  document.getElementById('oQty').value='';
-  document.getElementById('oTotal').value='';
+
+  // 폼 초기화 (새 발주 준비)
+  resetOrderForm();
   refreshAll();
 }
 
@@ -9962,6 +10221,45 @@ function buildTaxDataFromAmtOrder(order, dealer, includeDeliveryFee) {
   const taxAmt = total - supplyAmt;
   const displayName = PROD_DISPLAY[order.product] || order.product;
   const items = [{ product: displayName, qty, unitPrice, amount }];
+
+  return {
+    dealerRegNo: info?.regNo || dealer.regNo || '',
+    dealerName:  dealer.name,
+    dealerCeo:   info?.ceo || dealer.ceo || '',
+    dealerAddr:  ((info?.address || dealer.address) || '').replace(/<br\s*\/?>/gi,', '),
+    dealerEmail: info?.email || dealer.email || '',
+    issueDate, items, total, supplyAmt, taxAmt
+  };
+}
+
+// ★ 다제품 발주용: 그룹 전체를 한 장의 세금계산서 데이터로 변환
+function buildTaxDataFromAmtOrderGroup(groupOrder, dealer, includeDeliveryFee) {
+  const hasFeeAuto = (groupOrder.fee || 0) > 0;
+  const includeFee = (includeDeliveryFee === undefined || includeDeliveryFee === null)
+    ? hasFeeAuto
+    : !!includeDeliveryFee;
+
+  const info = getDealerInfo(dealer, dealer.name, { includeDeliveryFee: includeFee });
+  const today = new Date();
+  const issueDate = today.getFullYear()+'년 '+(today.getMonth()+1)+'월 '+today.getDate()+'일';
+  const PROD_DISPLAY = { 'MEDIAS': 'MEDIAS T', 'MEDIAS T': 'MEDIAS T', 'JUC': 'JUC SPRAY DRESSING 10ml' };
+
+  const items = (groupOrder.items || []).map(it => {
+    const pd = info ? (info.products[it.product] || {}) : {};
+    const unitPrice = it.price || pd.price || 0;
+    const qty = Math.abs(it.qty || 0);
+    const amount = qty * unitPrice;
+    return {
+      product: PROD_DISPLAY[it.product] || it.product,
+      qty, unitPrice, amount
+    };
+  });
+
+  const itemsTotal = items.reduce((s,i) => s + i.amount, 0);
+  const deliveryAmt = includeFee ? (info?._fee || 0) : 0;
+  const total = itemsTotal + deliveryAmt;
+  const supplyAmt = Math.round(total / 1.1);
+  const taxAmt = total - supplyAmt;
 
   return {
     dealerRegNo: info?.regNo || dealer.regNo || '',
