@@ -8111,8 +8111,36 @@ function openRoleSwitchMenu(){
   const existing = document.getElementById('roleSwitchMenu');
   if(existing){ existing.remove(); return; }
 
-  // 대리점 목록 (선택용)
-  const dealerList = (window.dealers || []).filter(d => d.email).sort((a,b)=>a.name.localeCompare(b.name));
+  // 대리점 목록 (선택용) - dealers는 모듈 스코프 let 변수라 직접 참조
+  let dealerList = [];
+  try{
+    const src = (typeof dealers !== 'undefined' && Array.isArray(dealers)) ? dealers : [];
+    dealerList = src.filter(d => d && d.email).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  }catch(e){ console.warn('대리점 목록 읽기 실패:', e); }
+
+  _renderRoleSwitchMenu(dealerList);
+
+  // 메모리에 비어있으면 Firebase에서 직접 fetch 시도 (fallback)
+  if(dealerList.length === 0){
+    const fb = window._fb;
+    if(fb && fb.ready){
+      fb.get(fb.ref(fb.db, 'amt_data/dealers')).then(snap => {
+        if(!snap.exists()) return;
+        const raw = snap.val();
+        const arr = Array.isArray(raw) ? raw : Object.values(raw||{});
+        const filtered = arr.filter(d => d && d.email).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+        if(filtered.length > 0 && document.getElementById('roleSwitchMenu')){
+          _renderRoleSwitchMenu(filtered);
+        }
+      }).catch(e => console.warn('Firebase 대리점 fetch 실패:', e));
+    }
+  }
+}
+
+function _renderRoleSwitchMenu(dealerList){
+  // 기존 메뉴 제거 후 재생성
+  const prev = document.getElementById('roleSwitchMenu');
+  if(prev) prev.remove();
 
   const menu = document.createElement('div');
   menu.id = 'roleSwitchMenu';
