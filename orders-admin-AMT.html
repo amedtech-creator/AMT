@@ -591,10 +591,21 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
 .firebase-input-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;}
 </style>
 </head>
-<!-- ★ EmailJS 거래명세서 자동발송 -->
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<!-- ★ GAS 거래명세서 자동발송 -->
 <script>
-emailjs.init('QEu2X7xZAl1qXvQAI');
+// ══════════════════════════════════════════════════════
+//  ㈜케이와이메디칼 — 거래명세서 자동발송 모듈 (Google Apps Script 방식)
+//  amedtech@gmail.com 에서 직접 발송되므로 스팸 가능성 낮음
+// ══════════════════════════════════════════════════════
+
+// ★ GAS 웹 앱 URL — 배포 후 여기에 붙여넣으세요
+// 형식: https://script.google.com/macros/s/AKfycbxxxxxx.../exec
+window.GAS_EMAIL_URL = '';  // ← 이 값을 GAS 배포 URL로 교체
+try {
+  // Firebase config에 URL이 있으면 우선 사용 (나중에 변경 쉬움)
+  const cachedGasUrl = localStorage.getItem('amt_gas_email_url');
+  if (cachedGasUrl) window.GAS_EMAIL_URL = cachedGasUrl;
+} catch(e) {}
 
 // ══════════════════════════════════════════════════════
 //  ㈜케이와이메디칼 — 거래명세서 자동발송 모듈
@@ -801,23 +812,56 @@ function buildStatementHTML(items, dealerName, dealerInfo, orderId) {
 </div>`;
 }
 
-// ── 실제 EmailJS 발송 공통 함수 ──────────────────────────────
+// ── 실제 발송 공통 함수 (Google Apps Script) ──────────────────
 async function sendStatementEmail(dealerName, dealerEmail, orderId, statementHTML) {
-  // ★ 수신자 이메일 검증 (빈 값으로 EmailJS 호출 방지)
+  // ★ 수신자 이메일 검증 (빈 값으로 호출 방지)
   if(!dealerEmail || !dealerEmail.trim()){
     console.error('❌ 거래명세서 발송 중단: 수신자 이메일 없음', {dealerName, orderId});
     toast('⚠️ '+dealerName+' 이메일 없음 - 거래명세서 미발송','error');
     throw new Error('수신자 이메일 없음 ('+dealerName+')');
   }
+
+  // ★ GAS URL 검증
+  let gasUrl = window.GAS_EMAIL_URL;
+  if(!gasUrl){
+    // Firebase config에서 재시도 (관리자가 설정 화면에서 저장한 경우)
+    try{
+      const fb = window._fb;
+      if(fb && fb.ready){
+        const snap = await fb.get(fb.ref(fb.db, 'config/gasEmailUrl'));
+        if(snap.exists()){
+          gasUrl = snap.val();
+          window.GAS_EMAIL_URL = gasUrl;
+          localStorage.setItem('amt_gas_email_url', gasUrl);
+        }
+      }
+    }catch(e){}
+  }
+  if(!gasUrl){
+    console.error('❌ GAS 이메일 URL 미설정 - 설정 화면에서 등록 필요');
+    toast('⚠️ 이메일 서비스 URL 미설정 (설정 탭에서 등록)','error');
+    throw new Error('GAS URL 없음');
+  }
+
   console.log('📧 거래명세서 발송 시도 →', dealerEmail, '(대리점:', dealerName, '/ 주문:', orderId, ')');
-  await emailjs.send('service_bz3i3j6', 'template_gpbeyhn', {
-    dealer_name:    dealerName,
-    dealer_email:   dealerEmail,
-    to_email:       dealerEmail, // ★ EmailJS 템플릿의 "To Email" 필드가 {{to_email}}일 수도 있어 둘 다 전송
-    email:          dealerEmail, // ★ 또는 {{email}}
-    order_number:   orderId,
-    statement_html: statementHTML
+
+  // GAS는 preflight(OPTIONS) 대응 안 되므로 text/plain으로 보내서 preflight 회피
+  const res = await fetch(gasUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      type: 'statement',
+      to: dealerEmail,
+      dealerName: dealerName,
+      orderId: orderId,
+      html: statementHTML
+    })
   });
+  const result = await res.json();
+  if(!result.ok){
+    throw new Error(result.error || 'GAS 응답 실패');
+  }
+  return result;
 }
 
 // ── [경로1] KY주문 출고 시 발송 ─────────────────────────────
@@ -1692,6 +1736,24 @@ async function sendStatementOnAmtOrder(order, dealer) {
         <button class="btn btn-ghost btn-sm" onclick="fbSync()">☁️ 지금 동기화</button>
         <button class="btn btn-outline btn-sm" onclick="checkFbConnection()">🔍 연결 확인</button>
       </div>
+    </div>
+    <hr class="divider">
+    <div class="setting-section" id="gasEmailSection" style="display:none">
+      <h3>📧 이메일 발송 서비스 (Google Apps Script)</h3>
+      <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
+        거래명세서 및 OTP 인증 메일을 <b>amedtech@gmail.com</b> 에서 직접 발송합니다.<br>
+        Google Apps Script 배포 후 "웹 앱 URL"을 입력하세요 (<span style="color:var(--red)">총괄관리자 전용</span>)
+      </p>
+      <div class="form-group">
+        <label>GAS 웹 앱 URL</label>
+        <input id="gas_email_url" placeholder="https://script.google.com/macros/s/AKfycb.../exec" style="font-family:monospace;font-size:.82rem">
+        <span style="font-size:.7rem;color:var(--text3);margin-top:3px;display:block">※ script.google.com → 프로젝트 → 배포 → 새 배포 → 웹 앱 → URL 복사</span>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="saveGasEmailUrl()">💾 저장</button>
+        <button class="btn btn-outline btn-sm" onclick="testGasEmail()">🧪 테스트 발송</button>
+      </div>
+      <div id="gasEmailStatus" style="margin-top:10px;font-size:.78rem"></div>
     </div>
     <hr class="divider">
     <div class="setting-section">
@@ -8221,6 +8283,92 @@ function impersonateDealer(emailEncoded, dealerName){
   if(menu) menu.remove();
 }
 
+/* ═══════════════════════════════════════════════════════
+   GAS 이메일 서비스 설정 (총괄관리자 전용)
+═══════════════════════════════════════════════════════ */
+async function initGasEmailSettings(){
+  const section = document.getElementById('gasEmailSection');
+  if(!section) return;
+  if(!_isRealSuperAdmin()){ section.style.display='none'; return; }
+  section.style.display='block';
+
+  // 현재 저장된 URL 로드 (Firebase 우선 → 없으면 localStorage)
+  let savedUrl = '';
+  try{
+    const fb = window._fb;
+    if(fb && fb.ready){
+      const snap = await fb.get(fb.ref(fb.db, 'config/gasEmailUrl'));
+      if(snap.exists()) savedUrl = snap.val();
+    }
+  }catch(e){}
+  if(!savedUrl){
+    savedUrl = localStorage.getItem('amt_gas_email_url') || '';
+  }
+  if(savedUrl){
+    const input = document.getElementById('gas_email_url');
+    if(input) input.value = savedUrl;
+    window.GAS_EMAIL_URL = savedUrl;
+  }
+}
+
+async function saveGasEmailUrl(){
+  if(!_isRealSuperAdmin()){ toast('총괄관리자 전용','error'); return; }
+  const input = document.getElementById('gas_email_url');
+  const url = (input.value||'').trim();
+  if(!url){ toast('URL을 입력하세요','error'); return; }
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)){
+    if(!confirm('URL 형식이 예상과 다릅니다 (https://script.google.com/macros/s/.../exec).\n그래도 저장할까요?')) return;
+  }
+  try{
+    const fb = window._fb;
+    if(fb && fb.ready){
+      await fb.set(fb.ref(fb.db, 'config/gasEmailUrl'), url);
+    }
+    localStorage.setItem('amt_gas_email_url', url);
+    window.GAS_EMAIL_URL = url;
+    toast('✅ GAS 이메일 URL 저장됨','success');
+    document.getElementById('gasEmailStatus').innerHTML = '<span style="color:var(--green)">✅ 저장 완료 - "테스트 발송"으로 확인하세요</span>';
+  }catch(e){
+    toast('❌ 저장 실패: '+e.message,'error');
+  }
+}
+
+async function testGasEmail(){
+  const url = window.GAS_EMAIL_URL || (document.getElementById('gas_email_url').value||'').trim();
+  if(!url){ toast('먼저 URL을 저장하세요','error'); return; }
+
+  const sess = JSON.parse(sessionStorage.getItem('amt_auth_session')||'{}');
+  const testTo = sess.email || 'amedtech@gmail.com';
+
+  const statusEl = document.getElementById('gasEmailStatus');
+  statusEl.innerHTML = '⏳ 발송 중...';
+  try{
+    const code = String(Math.floor(100000 + Math.random()*900000));
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        type: 'otp',
+        to: testTo,
+        code: code,
+        appName: 'AMT 관리시스템 (테스트)',
+        validMinutes: 5
+      })
+    });
+    const result = await res.json();
+    if(result.ok){
+      statusEl.innerHTML = '<span style="color:var(--green)">✅ 성공! '+testTo+' 받은편지함 확인 (인증코드: '+code+')</span>';
+      toast('✅ 테스트 메일 발송 완료','success');
+    } else {
+      statusEl.innerHTML = '<span style="color:var(--red)">❌ 실패: '+(result.error||'')+'</span>';
+      toast('❌ 발송 실패: '+(result.error||''),'error');
+    }
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">❌ 에러: '+e.message+'</span>';
+    toast('❌ 에러: '+e.message,'error');
+  }
+}
+
 // OTP 요청: 총관리자가 아닌 경우 OTP 필요
 async function requireOtp(actionLabel, callback){
   // 총관리자는 OTP 없이 바로 실행
@@ -8873,6 +9021,9 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   // ★ 역할 전환 UI 초기화 (실 총괄만 노출)
   try{ initRoleSwitchUI(); }catch(e){ console.warn('역할전환 UI 초기화 실패:', e); }
+
+  // ★ GAS 이메일 설정 UI 초기화 (총괄만)
+  try{ initGasEmailSettings(); }catch(e){ console.warn('GAS 이메일 설정 초기화 실패:', e); }
 
   // 텔레그램 설정 로드 & 초기화
   setTimeout(() => {

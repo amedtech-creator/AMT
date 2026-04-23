@@ -37,6 +37,11 @@
     .btn.loading .btn-text{opacity:0}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <!-- ↑ EmailJS는 더 이상 사용하지 않지만 호환성 위해 유지 (로드되어도 호출 없음) -->
+  <script>
+    // ★ GAS 이메일 서비스 URL (amedtech@gmail.com 에서 발송)
+    window.GAS_EMAIL_URL = '';  // ← GAS 배포 URL 붙여넣기 (또는 Firebase config에서 읽음)
+  </script>
 </head>
 <body>
 <div class="card">
@@ -280,19 +285,29 @@ async function sendOtp(email){
 
   let sent = false;
   try{
-    const snap = await get(ref(db,'config/emailjs'));
-    if(snap.exists()){
-      const cfg = snap.val();
-      if(cfg.serviceId && cfg.templateId){
-        if(cfg.publicKey) emailjs.init(cfg.publicKey);
-        const res = await emailjs.send(cfg.serviceId, cfg.templateId, {
-          to_email: email,
-          otp_code: code,
-          app_name: 'AMT 관리시스템',
-          valid_minutes: '5'
-        });
-        if(res.status === 200) sent = true;
-      }
+    // ★ GAS URL 조회 (메모리 → Firebase config 순)
+    let gasUrl = window.GAS_EMAIL_URL;
+    if(!gasUrl){
+      const urlSnap = await get(ref(db,'config/gasEmailUrl'));
+      if(urlSnap.exists()) gasUrl = urlSnap.val();
+    }
+    if(gasUrl){
+      const res = await fetch(gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          type: 'otp',
+          to: email,
+          code: code,
+          appName: 'AMT 관리시스템',
+          validMinutes: 5
+        })
+      });
+      const result = await res.json();
+      if(result.ok) sent = true;
+      else console.warn('GAS OTP 발송 실패:', result.error);
+    } else {
+      console.warn('GAS URL 미설정');
     }
   }catch(e){ console.warn('이메일 발송 실패',e); }
 
