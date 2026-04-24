@@ -5013,6 +5013,13 @@ async function saveKySupply(){
   const msgEl = document.getElementById('kySupplyMsg');
   if(msgEl){ msgEl.textContent='저장됨 · '+date; setTimeout(()=>msgEl.textContent='',3000); }
   renderDebtSummary(); renderInternalList(); renderInvCards(); renderInvHistory();
+
+  // ★ AMT→KY 물품공급 저장 후 → 전자세금계산서 발행 미리보기 팝업 표시
+  //   AMT(공급자) → KY(공급받는자) 과세 세금계산서
+  showTaxInvoicePreview({
+    tradeId: id,
+    date, product: prod, qty, price, total
+  });
 }
 
 
