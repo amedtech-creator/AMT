@@ -4478,8 +4478,8 @@ async function issueTaxInvoice(){
   const btn = document.getElementById('taxInvoiceIssueBtn');
   const statusEl = document.getElementById('taxInvoiceStatus');
 
-  // GAS URL 가져오기
-  const gasUrl = localStorage.getItem('gas_email_url') || '';
+  // GAS URL 가져오기 (이메일 시스템과 동일한 URL 사용)
+  const gasUrl = localStorage.getItem('amt_gas_email_url') || window.GAS_EMAIL_URL || '';
   if(!gasUrl){
     alert('GAS 웹 앱 URL이 설정되지 않았습니다. 설정 탭에서 먼저 입력하세요.');
     return;
