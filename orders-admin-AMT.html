@@ -10432,113 +10432,129 @@ if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
 }
 </script>
 
-<!-- ★ 전자세금계산서 반자동 모달 -->
-<div id="taxModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:12px;width:100%;max-width:580px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25)">
+<!-- ★ 전자세금계산서 발행 모달 (KY→대리점) -->
+<div id="taxModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:12px;max-width:720px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3)">
     <!-- 헤더 -->
-    <div style="background:#1e40af;color:#fff;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center">
+    <div style="padding:18px 24px;border-bottom:2px solid #d97706;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(to right, #ffedd5, #fff)">
       <div>
-        <div style="font-size:15px;font-weight:700">전자세금계산서 발행 데이터</div>
-        <div style="font-size:11px;opacity:.8;margin-top:2px">홈택스에 복사·붙여넣기 하세요</div>
+        <h3 style="margin:0;font-size:1.1rem;color:#9a3412">📋 전자세금계산서 발행 미리보기</h3>
+        <p id="taxModalSubtitle" style="margin:4px 0 0;font-size:.75rem;color:#9a3412"></p>
       </div>
-      <button onclick="closeTaxModal()" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px">✕ 닫기</button>
-    </div>
-    <!-- 안내 배너 -->
-    <div style="background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:10px 20px;font-size:12px;color:#1e40af;display:flex;align-items:center;gap:8px">
-      <span style="font-size:16px">📋</span>
-      <span>각 항목 옆 <b>[복사]</b> 버튼을 눌러 홈택스에 붙여넣기 하세요. 작성 완료 후 공인인증서로 발행하시면 됩니다.</span>
+      <button onclick="closeTaxModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:#6b7280">✕</button>
     </div>
     <!-- 내용 -->
-    <div style="padding:16px 20px" id="taxContent"></div>
-    <!-- ★ 바로빌 발행 상태 영역 -->
-    <div id="taxBarobillStatus" style="display:none;margin:0 20px 12px;padding:10px 12px;border-radius:8px;font-size:12px"></div>
+    <div style="padding:20px 24px" id="taxContent"></div>
+    <!-- 주의사항 -->
+    <div id="taxBarobillWarn" style="margin:0 24px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;font-size:.78rem;color:#991b1b">
+      ⚠️ <b>"바로빌 발행" 클릭 시 실제로 바로빌에 세금계산서가 저장·발행됩니다.</b><br>
+      <span style="font-size:.72rem">※ 현재 모드: <b>테스트 서버 (testws.baroservice.com)</b> · 국세청에 실제 전송되지 않음</span>
+    </div>
+    <!-- 진행 상태 -->
+    <div id="taxBarobillStatus" style="display:none;margin:0 24px 14px;padding:12px;border-radius:8px;font-size:.85rem"></div>
     <!-- 하단 버튼 -->
-    <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-      <button onclick="openHometax()" style="padding:10px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;cursor:pointer">🏛️ 홈택스</button>
-      <button onclick="copyAllTax()" style="padding:10px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;cursor:pointer">📋 복사</button>
-      <button id="taxBarobillIssueBtn" onclick="issueBarobillFromTaxModal()" style="padding:10px 20px;background:#d97706;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer">🧾 바로빌 발행</button>
-      <button onclick="closeTaxModal()" style="padding:10px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;cursor:pointer">닫기</button>
+    <div style="padding:12px 24px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button onclick="openHometax()" class="btn btn-ghost" style="padding:9px 14px;font-size:.8rem">🏛️ 홈택스</button>
+      <button onclick="copyAllTax()" class="btn btn-ghost" style="padding:9px 14px;font-size:.8rem">📋 복사</button>
+      <button onclick="closeTaxModal()" class="btn btn-secondary" style="padding:9px 14px;font-size:.85rem">취소</button>
+      <button id="taxBarobillIssueBtn" onclick="issueBarobillFromTaxModal()" class="btn btn-primary" style="background:#d97706;border-color:#d97706;padding:9px 20px;font-size:.9rem;font-weight:700">🧾 바로빌 발행</button>
     </div>
   </div>
 </div>
 
 <script>
-// ── 세금계산서 모달 열기 ────────────────────────────────────
+// ── 세금계산서 모달 열기 (KY→대리점) ─────────────────────────
 function openTaxModal(data) {
-  // data: { supplierRegNo, supplierName, supplierCeo, supplierAddr,
-  //         dealerRegNo, dealerName, dealerCeo, dealerAddr,
+  // data: { dealerRegNo, dealerName, dealerCeo, dealerAddr, dealerEmail,
   //         issueDate, items:[{product,qty,unitPrice,amount}], total, supplyAmt, taxAmt }
   const supplyAmt = data.supplyAmt || Math.round(data.total / 1.1);
   const taxAmt    = data.taxAmt    || (data.total - supplyAmt);
 
-  const rows = (data.items||[]).map((item,i) => `
-    <tr style="border-bottom:1px solid #f3f4f6">
-      <td style="padding:7px 8px;font-size:12px;color:#374151">${i+1}</td>
-      <td style="padding:7px 8px;font-size:12px">${item.product}</td>
-      <td style="padding:7px 8px;font-size:12px;text-align:center">${(item.qty||0).toLocaleString()}</td>
-      <td style="padding:7px 8px;font-size:12px;text-align:right">${(item.unitPrice||0).toLocaleString()}</td>
-      <td style="padding:7px 8px;font-size:12px;text-align:right">${(item.amount||0).toLocaleString()}</td>
-    </tr>`).join('');
+  // 부제목 표시
+  const subtitle = document.getElementById('taxModalSubtitle');
+  if(subtitle){
+    const itemNames = (data.items||[]).map(i => i.product).slice(0,2).join(', ');
+    subtitle.textContent = `KY→${data.dealerName} · ${data.issueDate} · ${itemNames}${(data.items||[]).length > 2 ? ' 외' : ''}`;
+  }
+
+  // 품목 행
+  const rows = (data.items||[]).map(item => {
+    const itemSupply = Math.round((item.amount||0) / 1.1);
+    const itemTax = (item.amount||0) - itemSupply;
+    return `
+    <tr>
+      <td style="border:1px solid var(--border);padding:8px;text-align:center">${data.issueDate||''}</td>
+      <td style="border:1px solid var(--border);padding:8px">${item.product||''}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:center">${(item.qty||0).toLocaleString()}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:right">${(item.unitPrice||0).toLocaleString()}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:right">${itemSupply.toLocaleString()}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:right">${itemTax.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
 
   document.getElementById('taxContent').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-      <!-- 공급자 -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:8px;text-transform:uppercase">공급자</div>
-        ${taxField('사업자번호', '110-86-00994')}
-        ${taxField('상호', '㈜케이와이메디칼')}
-        ${taxField('대표자', '강승섭')}
-        ${taxField('주소', '서울시 은평구 통일로87길 18-6, 2층')}
+    <!-- 공급자 / 공급받는자 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:#f9fafb">
+        <div style="font-size:.7rem;color:var(--text3);font-weight:700;margin-bottom:8px">공급자 (발행자)</div>
+        <div style="font-size:.85rem;line-height:1.6">
+          <div><b>(주)케이와이메디칼</b></div>
+          <div style="color:var(--text2)">등록번호: 110-86-00994</div>
+          <div style="color:var(--text2)">대표자: 강승섭</div>
+          <div style="color:var(--text2);font-size:.75rem">서울시 은평구 통일로87길 18-6, 2층</div>
+        </div>
       </div>
-      <!-- 공급받는자 -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:8px;text-transform:uppercase">공급받는자</div>
-        ${taxField('사업자번호', data.dealerRegNo||'')}
-        ${taxField('상호', data.dealerName||'')}
-        ${taxField('대표자', data.dealerCeo||'')}
-        ${taxField('주소', data.dealerAddr||'')}
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:#f9fafb">
+        <div style="font-size:.7rem;color:var(--text3);font-weight:700;margin-bottom:8px">공급받는자</div>
+        <div style="font-size:.85rem;line-height:1.6">
+          <div><b>${data.dealerName||''}</b></div>
+          <div style="color:var(--text2)">등록번호: ${data.dealerRegNo||'(미등록)'}</div>
+          <div style="color:var(--text2)">대표자: ${data.dealerCeo||'(미등록)'}</div>
+          <div style="color:var(--text2);font-size:.75rem">${data.dealerAddr||'(미등록)'}</div>
+        </div>
       </div>
     </div>
 
-    <!-- 작성일자 / 금액 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
-      ${taxField('작성일자', data.issueDate||'')}
-      ${taxField('공급가액', supplyAmt.toLocaleString()+'원')}
-      ${taxField('세액 (10%)', taxAmt.toLocaleString()+'원')}
+    <!-- 품목 표 -->
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:.85rem">
+      <thead style="background:#f3f4f6">
+        <tr>
+          <th style="border:1px solid var(--border);padding:8px;text-align:center">작성일자</th>
+          <th style="border:1px solid var(--border);padding:8px;text-align:center">품목</th>
+          <th style="border:1px solid var(--border);padding:8px;text-align:center">수량</th>
+          <th style="border:1px solid var(--border);padding:8px;text-align:right">단가</th>
+          <th style="border:1px solid var(--border);padding:8px;text-align:right">공급가액</th>
+          <th style="border:1px solid var(--border);padding:8px;text-align:right">세액</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <!-- 합계 카드 -->
+    <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;margin-bottom:14px">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#eff6ff">
+        <div style="font-size:.7rem;color:var(--text3)">공급가액</div>
+        <div style="font-size:1rem;font-weight:700;color:#1e40af">${supplyAmt.toLocaleString()} 원</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fef3c7">
+        <div style="font-size:.7rem;color:var(--text3)">세액 (VAT)</div>
+        <div style="font-size:1rem;font-weight:700;color:#92400e">${taxAmt.toLocaleString()} 원</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#dcfce7">
+        <div style="font-size:.7rem;color:var(--text3)">합계금액</div>
+        <div style="font-size:1rem;font-weight:700;color:#166534">${data.total.toLocaleString()} 원</div>
+      </div>
     </div>
 
-    <!-- 품목 -->
-    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:14px">
-      <div style="background:#f1f5f9;padding:8px 12px;font-size:11px;font-weight:700;color:#475569">품목 내역</div>
-      <table style="width:100%;border-collapse:collapse">
-        <thead>
-          <tr style="background:#f8fafc;font-size:11px;color:#64748b">
-            <th style="padding:7px 8px;text-align:left;width:24px">No</th>
-            <th style="padding:7px 8px;text-align:left">품명</th>
-            <th style="padding:7px 8px;text-align:center;width:56px">수량</th>
-            <th style="padding:7px 8px;text-align:right;width:80px">단가</th>
-            <th style="padding:7px 8px;text-align:right;width:88px">공급가액</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-        <tfoot>
-          <tr style="background:#f1f5f9;font-weight:700;font-size:12px">
-            <td colspan="4" style="padding:8px 12px;text-align:right">합계 (공급가액+세액)</td>
-            <td style="padding:8px 12px;text-align:right;color:#1e40af">${data.total.toLocaleString()}원</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-
-    <!-- 이메일 (홈택스 전송용) -->
-    <div style="background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:10px 12px;font-size:12px;color:#854d0e">
-      <b>💡 홈택스 전송 이메일:</b> ${data.dealerEmail||'미등록 — 홈택스에서 직접 입력'}
+    <!-- 수신 이메일 -->
+    <div style="background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:10px 12px;font-size:.78rem;color:#854d0e">
+      <b>📧 세금계산서 수신 이메일:</b> ${data.dealerEmail||'<span style="color:#dc2626">미등록 - 대리점관리에서 설정하세요</span>'}
     </div>
   `;
 
   // 전체 복사용 텍스트 저장
   window._taxCopyText = [
-    '[공급자] 사업자번호: 110-86-00994 / 상호: ㈜케이와이메디칼 / 대표자: 강승섭',
+    '[공급자] 사업자번호: 110-86-00994 / 상호: (주)케이와이메디칼 / 대표자: 강승섭',
     '[공급받는자] 사업자번호: '+(data.dealerRegNo||'') +' / 상호: '+(data.dealerName||'')+' / 대표자: '+(data.dealerCeo||''),
     '작성일자: '+(data.issueDate||''),
     '공급가액: '+supplyAmt.toLocaleString()+'원 / 세액: '+taxAmt.toLocaleString()+'원 / 합계: '+data.total.toLocaleString()+'원',
@@ -10558,30 +10574,21 @@ function openTaxModal(data) {
     issueBtn.disabled = false;
     issueBtn.style.opacity = '1';
     issueBtn.textContent = '🧾 바로빌 발행';
+    issueBtn.style.background = '#d97706';
+    issueBtn.style.borderColor = '#d97706';
   }
+  // 경고 배너 다시 보이기
+  const warnEl = document.getElementById('taxBarobillWarn');
+  if(warnEl) warnEl.style.display = '';
 
   const modal = document.getElementById('taxModal');
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
 
-function taxField(label, value) {
-  const id = 'tf_'+Math.random().toString(36).slice(2,7);
-  return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-    <span style="font-size:11px;color:#64748b;min-width:58px;flex-shrink:0">${label}</span>
-    <span id="${id}" style="font-size:12px;font-weight:600;color:#111;flex:1;word-break:break-all">${value}</span>
-    <button onclick="copyText('${id}')" style="flex-shrink:0;padding:2px 7px;background:#e0e7ff;color:#3730a3;border:none;border-radius:4px;font-size:10px;cursor:pointer;font-weight:700">복사</button>
-  </div>`;
-}
-
-function copyText(id) {
-  const el = document.getElementById(id);
-  if(!el) return;
-  navigator.clipboard.writeText(el.textContent).then(() => {
-    const btn = el.nextElementSibling;
-    if(btn){ const orig=btn.textContent; btn.textContent='✓'; btn.style.background='#dcfce7'; btn.style.color='#166534'; setTimeout(()=>{ btn.textContent=orig; btn.style.background='#e0e7ff'; btn.style.color='#3730a3'; },1200); }
-  });
-}
+// (더 이상 사용 안 함 - 내부거래 스타일로 통일. 필드별 복사 버튼 제거)
+function taxField(label, value) { return ''; }
+function copyText(id) { }
 
 function copyAllTax() {
   navigator.clipboard.writeText(window._taxCopyText||'').then(() => {
