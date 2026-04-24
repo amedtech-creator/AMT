@@ -771,6 +771,10 @@ function getDealerInfo(dealerOrIdOrCode, dealerNameFallback, options) {
     regNo: (d && d.regNo) || master?.regNo || '',
     ceo: (d && d.ceo) || master?.ceo || '',
     email: (d && d.email) || master?.email || '',
+    // ★ 거래명세서 수신 이메일 - 미설정 시 로그인 이메일(email) 폴백
+    statementEmail: (d && d.statementEmail) || (d && d.email) || master?.email || '',
+    // ★ 세금계산서 수신 이메일 - 미설정 시 로그인 이메일(email) 폴백
+    taxEmail: (d && d.taxEmail) || (d && d.email) || master?.email || '',
     address: addressRaw,
     products: productsMap,
     // 원본 참조
@@ -1011,8 +1015,9 @@ async function sendStatementOnKyShip(order, includeDeliveryFee) {
     });
 
     const html = buildStatementHTML(items, order.dealerName, info, order.id);
-    await sendStatementEmail(order.dealerName, info.email, order.id, html);
-    console.log('✅ 거래명세서 발송 완료 →', info.email, '(택배비 포함:', includeFee, ')');
+    const targetEmail = info.statementEmail || info.email;
+    await sendStatementEmail(order.dealerName, targetEmail, order.id, html);
+    console.log('✅ 거래명세서 발송 완료 →', targetEmail, '(택배비 포함:', includeFee, ')');
   } catch(e) {
     console.error('거래명세서 발송 실패:', e);
     toast('⚠️ 출고 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -1045,8 +1050,9 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
     }];
 
     const html = buildStatementHTML(items, dealer.name, info, order.id);
-    await sendStatementEmail(dealer.name, info.email, order.id, html);
-    console.log('✅ 거래명세서 발송 완료 →', info.email, '(택배비 포함:', includeFee, ')');
+    const targetEmail = info.statementEmail || info.email;
+    await sendStatementEmail(dealer.name, targetEmail, order.id, html);
+    console.log('✅ 거래명세서 발송 완료 →', targetEmail, '(택배비 포함:', includeFee, ')');
   } catch(e) {
     console.error('거래명세서 발송 실패:', e);
     toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -1084,8 +1090,9 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
     if(!items.length){ toast('⚠️ 그룹 주문에 제품이 없습니다','error'); return; }
 
     const html = buildStatementHTML(items, dealer.name, info, groupOrder.id);
-    await sendStatementEmail(dealer.name, info.email, groupOrder.id, html);
-    console.log('✅ 거래명세서 발송 완료 (다제품 그룹) →', info.email, items.length+'개 품목');
+    const targetEmail = info.statementEmail || info.email;
+    await sendStatementEmail(dealer.name, targetEmail, groupOrder.id, html);
+    console.log('✅ 거래명세서 발송 완료 (다제품 그룹) →', targetEmail, items.length+'개 품목');
   } catch(e) {
     console.error('거래명세서 발송 실패 (그룹):', e);
     toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -2157,12 +2164,22 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
     </div>
     <div class="form-grid">
       <div class="form-group" style="flex:2;min-width:200px">
-        <label>이메일 <span class="req">*</span> <span style="font-size:.7rem;color:var(--text3);font-weight:400">(KY 주문 로그인용)</span></label>
-        <input type="email" id="dmEmail" placeholder="example@naver.com">
+        <label>로그인 이메일 <span class="req">*</span> <span style="font-size:.7rem;color:var(--text3);font-weight:400">(KY 주문 로그인용 - 필수)</span></label>
+        <input type="email" id="dmEmail" placeholder="login@example.com">
       </div>
       <div class="form-group">
         <label>코드번호 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(로그인 비밀번호)</span></label>
         <input type="text" id="dmCode" placeholder="숫자 또는 영문">
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group" style="flex:1;min-width:48%">
+        <label>📄 거래명세서 수신 이메일 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(비워두면 로그인 이메일 사용)</span></label>
+        <input type="email" id="dmStatementEmail" placeholder="statement@example.com">
+      </div>
+      <div class="form-group" style="flex:1;min-width:48%">
+        <label>🧾 세금계산서 수신 이메일 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(비워두면 로그인 이메일 사용)</span></label>
+        <input type="email" id="dmTaxEmail" placeholder="tax@example.com">
       </div>
     </div>
     <div class="form-grid">
@@ -5669,7 +5686,23 @@ function renderDealerCards(){
   const pColors={'JUC':'var(--juc)','MEDIAS':'var(--medias)','MEDIAS T':'var(--medias)','DELL':'var(--dell)'};
 
   if(!dealers.length){ document.getElementById('dealerCards').innerHTML=emptyHtml('대리점이 없습니다'); return; }
-  document.getElementById('dealerCards').innerHTML=`<div class="dealer-cards">${dealers.map(d=>`
+  document.getElementById('dealerCards').innerHTML=`<div class="dealer-cards">${dealers.map(d=>{
+    // 이메일 3종 표시 (모두 같으면 하나만, 다르면 구분해서)
+    const loginE = d.email || '';
+    const stmtE = d.statementEmail || '';
+    const taxE = d.taxEmail || '';
+    const allSame = loginE && (!stmtE || stmtE === loginE) && (!taxE || taxE === loginE);
+    let emailHtml = '';
+    if(allSame){
+      emailHtml = `<span title="로그인/명세서/세금계산서 모두 동일">📧 ${loginE}</span>`;
+    } else {
+      const lines = [];
+      if(loginE) lines.push(`🔐 ${loginE}`);
+      if(stmtE && stmtE !== loginE) lines.push(`📄 ${stmtE}`);
+      if(taxE && taxE !== loginE) lines.push(`🧾 ${taxE}`);
+      emailHtml = `<span style="display:flex;flex-direction:column;gap:2px;font-size:.72rem">${lines.map(l=>`<span>${l}</span>`).join('')}</span>`;
+    }
+    return `
     <div class="dealer-card">
       <div class="dealer-card-header">
         <div class="dealer-name">${d.name}</div>
@@ -5682,10 +5715,11 @@ function renderDealerCards(){
       <div class="dealer-info">
         <span>💳 ${termDisplay(d.term)}</span>
         ${d.fee>0?`<span>📦 택배비 ${fmt(d.fee)}원</span>`:''}
+        ${emailHtml}
         ${d.note?`<span>📝 ${d.note}</span>`:''}
       </div>
     </div>
-  `).join('')}</div>`;
+  `;}).join('')}</div>`;
 }
 
 function openDealerModal(id=null){
@@ -5696,6 +5730,8 @@ function openDealerModal(id=null){
   // 초기화
   document.getElementById('dmName').value='';
   document.getElementById('dmEmail').value='';
+  document.getElementById('dmStatementEmail').value='';
+  document.getElementById('dmTaxEmail').value='';
   document.getElementById('dmCode').value='';
   document.getElementById('dmTerm').value='same';
   document.getElementById('dmCustomRow').style.display='none';
@@ -5713,6 +5749,8 @@ function openDealerModal(id=null){
     if(d){
       document.getElementById('dmName').value=d.name;
       document.getElementById('dmEmail').value=d.email||'';
+      document.getElementById('dmStatementEmail').value=d.statementEmail||'';
+      document.getElementById('dmTaxEmail').value=d.taxEmail||'';
       document.getElementById('dmCode').value=d.code||'';
       // ★ Fix 3: custom:MODE:N 파싱
       if(typeof d.term === 'string' && d.term.startsWith('custom:')){
@@ -5930,6 +5968,8 @@ async function saveDealer(){
 async function _doSaveDealer(){
   const name=document.getElementById('dmName').value.trim();
   const email=document.getElementById('dmEmail').value.trim().toLowerCase();
+  const statementEmail=document.getElementById('dmStatementEmail').value.trim().toLowerCase();
+  const taxEmail=document.getElementById('dmTaxEmail').value.trim().toLowerCase();
   const code=document.getElementById('dmCode').value.trim();
   let term=document.getElementById('dmTerm').value;
   // ★ Fix 3: custom 선택 시 mode:day로 조립
@@ -5947,8 +5987,10 @@ async function _doSaveDealer(){
   const address = document.getElementById('dmAddress').value.trim();
 
   if(!name){ toast('대리점명을 입력하세요','error'); return; }
-  if(!email){ toast('이메일을 입력하세요 (KY 주문 로그인용)','error'); return; }
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toast('이메일 형식이 올바르지 않습니다','error'); return; }
+  if(!email){ toast('로그인 이메일을 입력하세요 (필수)','error'); return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toast('로그인 이메일 형식이 올바르지 않습니다','error'); return; }
+  if(statementEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(statementEmail)){ toast('거래명세서 이메일 형식이 올바르지 않습니다','error'); return; }
+  if(taxEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(taxEmail)){ toast('세금계산서 이메일 형식이 올바르지 않습니다','error'); return; }
   if(!editingDealerId && !code){ toast('신규 대리점은 코드번호를 설정해야 합니다','error'); return; }
   if(code && code.length < 4){ toast('코드번호는 4자 이상이어야 합니다','error'); return; }
 
@@ -5977,7 +6019,7 @@ async function _doSaveDealer(){
     addAuditLog('edit','대리점',`수정: ${d.name} → ${name} (이메일: ${email})`);
     const finalCode = code || d.code || '';
     const oldEmail = d.email;
-    Object.assign(d,{name,email,code:finalCode,term,fee,note,products:prods,regNo,ceo,address});
+    Object.assign(d,{name,email,statementEmail,taxEmail,code:finalCode,term,fee,note,products:prods,regNo,ceo,address});
     d._v = Date.now(); // ★ Fix: 병합 시 이 변경이 최신임을 보장
     await fbSaveDoc('dealers',d.id,d);
     // ★ 이메일이 바뀌었거나 새 이메일이면 Auth 계정 생성 (더미PW)
@@ -5991,7 +6033,7 @@ async function _doSaveDealer(){
       toast('✅ 코드 변경됨 - 즉시 다음 로그인부터 적용','info');
     }
   } else {
-    const d={id:'d_'+Date.now(),name,email,code,term,fee,note,products:prods,regNo,ceo,address,_v:Date.now()};
+    const d={id:'d_'+Date.now(),name,email,statementEmail,taxEmail,code,term,fee,note,products:prods,regNo,ceo,address,_v:Date.now()};
     dealers.push(d);
     addAuditLog('create','대리점',`추가: ${name} (이메일: ${email})`);
     await fbSaveDoc('dealers',d.id,d);
@@ -10408,11 +10450,14 @@ if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
     </div>
     <!-- 내용 -->
     <div style="padding:16px 20px" id="taxContent"></div>
+    <!-- ★ 바로빌 발행 상태 영역 -->
+    <div id="taxBarobillStatus" style="display:none;margin:0 20px 12px;padding:10px 12px;border-radius:8px;font-size:12px"></div>
     <!-- 하단 버튼 -->
-    <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end">
-      <button onclick="openHometax()" style="padding:10px 20px;background:#16a34a;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer">🏛️ 홈택스 열기</button>
-      <button onclick="copyAllTax()" style="padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer">📋 전체 복사</button>
-      <button onclick="closeTaxModal()" style="padding:10px 20px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:13px;cursor:pointer">닫기</button>
+    <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button onclick="openHometax()" style="padding:10px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;cursor:pointer">🏛️ 홈택스</button>
+      <button onclick="copyAllTax()" style="padding:10px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;cursor:pointer">📋 복사</button>
+      <button id="taxBarobillIssueBtn" onclick="issueBarobillFromTaxModal()" style="padding:10px 20px;background:#d97706;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer">🧾 바로빌 발행</button>
+      <button onclick="closeTaxModal()" style="padding:10px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;cursor:pointer">닫기</button>
     </div>
   </div>
 </div>
@@ -10502,6 +10547,19 @@ function openTaxModal(data) {
     '전송이메일: '+(data.dealerEmail||'미등록')
   ].join('\n');
 
+  // ★ 바로빌 발행을 위해 data 저장
+  window._lastTaxData = data;
+
+  // 바로빌 발행 버튼/상태 초기화
+  const statusEl = document.getElementById('taxBarobillStatus');
+  if(statusEl){ statusEl.style.display = 'none'; statusEl.innerHTML = ''; }
+  const issueBtn = document.getElementById('taxBarobillIssueBtn');
+  if(issueBtn){
+    issueBtn.disabled = false;
+    issueBtn.style.opacity = '1';
+    issueBtn.textContent = '🧾 바로빌 발행';
+  }
+
   const modal = document.getElementById('taxModal');
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
@@ -10543,6 +10601,200 @@ function closeTaxModal() {
   document.body.style.overflow = '';
 }
 
+// =====================================================================
+// ★ KY → 대리점 세금계산서 바로빌 발행
+//   openTaxModal의 [🧾 바로빌 발행] 버튼 클릭 시 호출
+// =====================================================================
+async function issueBarobillFromTaxModal() {
+  const data = window._lastTaxData;
+  if(!data){ toast('발행 데이터가 없습니다. 모달을 다시 열어주세요.','error'); return; }
+
+  const btn = document.getElementById('taxBarobillIssueBtn');
+  const statusEl = document.getElementById('taxBarobillStatus');
+
+  // 필수 값 검증
+  if(!data.dealerRegNo){ toast('대리점 사업자번호가 없습니다. 대리점관리에서 등록하세요.','error'); return; }
+  if(!data.dealerCeo){ toast('대리점 대표자명이 없습니다.','error'); return; }
+  if(!data.dealerAddr){ toast('대리점 주소가 없습니다.','error'); return; }
+
+  // GAS URL 가져오기 (이메일 시스템과 동일한 URL 사용)
+  const gasUrl = localStorage.getItem('amt_gas_email_url') || window.GAS_EMAIL_URL || '';
+  if(!gasUrl){
+    alert('GAS 웹 앱 URL이 설정되지 않았습니다. 설정 탭에서 먼저 입력하세요.');
+    return;
+  }
+
+  // 확인 다이얼로그
+  const modeLabel = '테스트'; // 운영 여부는 GAS MODE 에 따라 자동 결정
+  const confirmMsg = `바로빌로 세금계산서를 발행하시겠습니까?\n\n`
+    + `공급자: ㈜케이와이메디칼\n`
+    + `공급받는자: ${data.dealerName} (${data.dealerRegNo})\n`
+    + `공급가액: ${data.supplyAmt.toLocaleString()}원\n`
+    + `세액: ${data.taxAmt.toLocaleString()}원\n`
+    + `합계: ${data.total.toLocaleString()}원\n`
+    + `수신 이메일: ${data.dealerEmail || '미설정'}\n\n`
+    + `※ GAS MODE가 'prod'면 실제 국세청 전송됩니다.`;
+  if(!confirm(confirmMsg)) return;
+
+  // 로딩 UI
+  btn.disabled = true;
+  btn.textContent = '⏳ 발행 중...';
+  btn.style.opacity = '0.6';
+  statusEl.style.display = 'block';
+  statusEl.style.background = '#eff6ff';
+  statusEl.style.color = '#1e40af';
+  statusEl.innerHTML = '📡 바로빌 API 호출 중입니다. 잠시만 기다려주세요...';
+
+  // WriteDate를 yyyyMMdd 포맷으로 변환 (issueDate는 "2026년 4월 24일" 형식)
+  const today = new Date();
+  const writeDate = today.getFullYear().toString()
+    + String(today.getMonth()+1).padStart(2,'0')
+    + String(today.getDate()).padStart(2,'0');
+
+  // 품목별 Tax 계산 (금액 × 10% 단순 계산)
+  const items = (data.items || []).map(i => {
+    const amount = i.amount || 0;
+    const tax = Math.round(amount * 0.1);
+    return {
+      PurchaseExpiry: writeDate,
+      Name: i.product || '',
+      Information: '',
+      ChargeableUnit: String(i.qty || 0),
+      UnitPrice: String(i.unitPrice || 0),
+      Amount: String(amount),
+      Tax: String(tax),
+      Description: ''
+    };
+  });
+
+  // 바로빌 invoice 페이로드
+  const invoicePayload = {
+    IssueDirection: 1,
+    TaxInvoiceType: 1,
+    ModifyCode: '',
+    TaxType: 1,
+    TaxCalcType: 1,
+    PurposeType: 2,  // 청구
+    WriteDate: writeDate,
+    AmountTotal: String(data.supplyAmt),
+    TaxTotal: String(data.taxAmt),
+    TotalAmount: String(data.total),
+    Cash: '', ChkBill: '', Note: '', Credit: '',
+    Remark1: `KY→${data.dealerName} (${items.length}개 품목)`.slice(0,50),
+    Remark2: '', Remark3: '',
+    Kwon: '', Ho: '', SerialNum: '',
+    // ★ 공급자: KY (인증키 소유자 - partner='KY' 사용)
+    InvoicerParty: {
+      MgtNum: 'K' + Date.now(),  // 관리번호 (영문+숫자, 고유)
+      CorpNum: '1108600994',  // KY 사업자번호
+      TaxRegID: '',
+      CorpName: '(주)케이와이메디칼',
+      CEOName: '강승섭',
+      Addr: '서울시 은평구 통일로87길 18-6, 2층',
+      BizClass: '도매업',
+      BizType: '의료기기',
+      ContactID: 'amtkorea',  // ★ KY 파트너 바로빌 가입 ID
+      ContactName: '강승섭',
+      TEL: '02-0000-0000',
+      HP: '010-0000-0000',
+      Email: 'amedtech@gmail.com'  // ★ KY 파트너 가입 이메일
+    },
+    // ★ 공급받는자: 대리점 (바로빌 미가입이어도 OK)
+    InvoiceeParty: {
+      MgtNum: '',
+      CorpNum: (data.dealerRegNo || '').replace(/-/g,''),
+      TaxRegID: '',
+      CorpName: data.dealerName || '',
+      CEOName: data.dealerCeo || '',
+      Addr: data.dealerAddr || '',
+      BizClass: '도매업',
+      BizType: '의료기기',
+      ContactID: '',  // ★ 대리점은 바로빌 미가입이므로 비움
+      ContactName: data.dealerCeo || '',
+      TEL: '02-0000-0000',
+      HP: '010-0000-0000',
+      Email: data.dealerEmail || ''  // ★ 대리점 세금계산서 수신 이메일
+    },
+    TaxInvoiceTradeLineItems: {
+      TaxInvoiceTradeLineItem: items
+    }
+  };
+
+  try {
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'barobill_issue',
+        partner: 'KY',  // ★ KY 파트너 키 사용
+        invoice: invoicePayload
+      })
+    });
+
+    const result = await response.json();
+    console.log('[바로빌 KY] 응답:', result);
+
+    if(result.ok){
+      statusEl.style.background = '#dcfce7';
+      statusEl.style.color = '#166534';
+      statusEl.innerHTML = `✅ <b>발행 성공!</b><br>`
+        + `일련번호: ${result.invoiceNum}<br>`
+        + `모드: ${result.mode === 'prod' ? '🔴 운영 (실제 국세청 전송)' : '🟡 테스트 (국세청 미전송)'}<br>`
+        + `수신: ${data.dealerEmail || '이메일 미설정'}`;
+      btn.textContent = '✅ 발행됨';
+      btn.style.background = '#16a34a';
+
+      // Firebase에 발행 기록 저장
+      try {
+        const fb = window._fb;
+        if(fb && fb.ready){
+          const logId = 'ky_' + Date.now();
+          await fb.set(fb.ref(fb.db, 'tax_invoices/' + logId), {
+            direction: 'KY_to_dealer',
+            dealerName: data.dealerName,
+            dealerRegNo: data.dealerRegNo,
+            dealerEmail: data.dealerEmail,
+            invoiceNum: result.invoiceNum,
+            mode: result.mode,
+            supplyAmount: data.supplyAmt,
+            taxAmount: data.taxAmt,
+            totalAmount: data.total,
+            itemsCount: items.length,
+            issuedAt: new Date().toISOString(),
+            issuedBy: window._amtAdminName || '─'
+          });
+        }
+      } catch(e){ console.warn('Firebase 로그 저장 실패:', e); }
+
+      addAuditLog('issue','세금계산서',
+        `KY→${data.dealerName} 발행 (No.${result.invoiceNum}, ${data.total.toLocaleString()}원)`);
+
+      toast(`✅ 세금계산서 발행 완료 (${result.invoiceNum})`,'success');
+
+      // 3초 후 자동 닫기
+      setTimeout(() => closeTaxModal(), 3000);
+    } else {
+      statusEl.style.background = '#fef2f2';
+      statusEl.style.color = '#991b1b';
+      statusEl.innerHTML = `❌ <b>발행 실패</b><br>`
+        + `에러코드: ${result.errorCode || 'N/A'}<br>`
+        + `에러메시지: ${result.errorMessage || result.error || '알 수 없음'}`;
+      btn.disabled = false;
+      btn.textContent = '🔄 다시 시도';
+      btn.style.opacity = '1';
+    }
+  } catch(e) {
+    console.error('[바로빌 KY] 호출 실패:', e);
+    statusEl.style.background = '#fef2f2';
+    statusEl.style.color = '#991b1b';
+    statusEl.innerHTML = `❌ <b>통신 오류</b><br>${e.message}<br>`
+      + `<span style="font-size:.7rem">※ GAS URL이 올바른지 확인하세요</span>`;
+    btn.disabled = false;
+    btn.textContent = '🔄 다시 시도';
+    btn.style.opacity = '1';
+  }
+}
+
 // ── KY출고 → 세금계산서 데이터 빌드 ────────────────────────
 function buildTaxDataFromKyOrder(order, includeDeliveryFee) {
   const hasFeeAuto = (order.fee || 0) > 0;
@@ -10572,7 +10824,7 @@ function buildTaxDataFromKyOrder(order, includeDeliveryFee) {
     dealerName:  order.dealerName,
     dealerCeo:   info?.ceo || '',
     dealerAddr:  (info?.address || '').replace(/<br\s*\/?>/gi,', '),
-    dealerEmail: info?.email || '',
+    dealerEmail: info?.taxEmail || info?.email || '',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
@@ -10603,7 +10855,7 @@ function buildTaxDataFromAmtOrder(order, dealer, includeDeliveryFee) {
     dealerName:  dealer.name,
     dealerCeo:   info?.ceo || dealer.ceo || '',
     dealerAddr:  ((info?.address || dealer.address) || '').replace(/<br\s*\/?>/gi,', '),
-    dealerEmail: info?.email || dealer.email || '',
+    dealerEmail: info?.taxEmail || info?.email || dealer.taxEmail || dealer.email || '',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
@@ -10642,7 +10894,7 @@ function buildTaxDataFromAmtOrderGroup(groupOrder, dealer, includeDeliveryFee) {
     dealerName:  dealer.name,
     dealerCeo:   info?.ceo || dealer.ceo || '',
     dealerAddr:  ((info?.address || dealer.address) || '').replace(/<br\s*\/?>/gi,', '),
-    dealerEmail: info?.email || dealer.email || '',
+    dealerEmail: info?.taxEmail || info?.email || dealer.taxEmail || dealer.email || '',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
