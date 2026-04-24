@@ -5525,6 +5525,28 @@ async function ensureDealerAuthAccount(email, code){
   }
 }
 
+// ★ 이메일을 Firebase 규칙에서 사용 가능한 키로 변환 (. → ,)
+// 이 키로 admin_emails 인덱스를 만들어 보안 규칙에서 root.child('admin_emails').child(emailToKey(auth.token.email)).exists() 로 체크
+function emailToKey(email){
+  return (email||'').toLowerCase().replace(/\./g, ',');
+}
+
+// ★ 이메일 인덱스 동기화 (amt_admins 변경 시 admin_emails 자동 반영)
+async function syncAdminEmailIndex(email, present){
+  const fb = window._fb;
+  if(!fb || !fb.ready) return;
+  const key = emailToKey(email);
+  try{
+    if(present){
+      await fb.set(fb.ref(fb.db, 'admin_emails/' + key), true);
+    } else {
+      await fb.set(fb.ref(fb.db, 'admin_emails/' + key), null);
+    }
+  }catch(e){
+    console.warn('admin_emails 인덱스 동기화 실패:', e);
+  }
+}
+
 async function ensureAuthAccount(email, code, displayName){
   // code 파라미터는 DB 저장용, Auth에는 더미PW 사용
   if(!email) return false;
@@ -8535,6 +8557,35 @@ async function loadAdminCodes(){
     const snap = await fb.get(fb.ref(fb.db,'amt_admins'));
     const data = snap.exists() ? snap.val() : {};
     renderAdminCodeList(data);
+
+    // ★ admin_emails 인덱스 자동 시드 (총괄관리자만)
+    if(isSuperAdmin()){
+      try{
+        const idxSnap = await fb.get(fb.ref(fb.db,'admin_emails'));
+        const idx = idxSnap.exists() ? idxSnap.val() : {};
+        const adminEmails = Object.values(data).filter(a => a && a.email).map(a => a.email);
+        // 총괄 이메일도 반드시 포함
+        if(!adminEmails.includes('kyunghoyou@gmail.com')){
+          adminEmails.push('kyunghoyou@gmail.com');
+        }
+        // 누락된 것 추가
+        for(const email of adminEmails){
+          const k = emailToKey(email);
+          if(!idx[k]){
+            await fb.set(fb.ref(fb.db,'admin_emails/'+k), true);
+            console.log('admin_emails 인덱스 추가:', email);
+          }
+        }
+        // 인덱스에만 있고 amt_admins에 없는 것 제거
+        const validKeys = new Set(adminEmails.map(e => emailToKey(e)));
+        for(const k of Object.keys(idx)){
+          if(!validKeys.has(k)){
+            await fb.set(fb.ref(fb.db,'admin_emails/'+k), null);
+            console.log('admin_emails 인덱스 제거 (미사용):', k);
+          }
+        }
+      }catch(e){ console.warn('admin_emails 인덱스 시드 실패:', e); }
+    }
   }catch(e){
     // 규칙 미허용 등
     renderAdminCodeList({});
@@ -8553,17 +8604,25 @@ function renderAdminCodeList(data){
   if(addBox) addBox.style.display = isSuper ? 'block' : 'none';
 
   // ★ 기본 관리자 목록
-  // - 총괄관리자: kyunghoyou@gmail.com (고정, 변경 불가)
+  // - 총괄관리자: kyunghoyou@gmail.com (고정, 변경 불가 - 단 본인 코드는 변경 가능)
   // - 일반관리자: Firebase amt_admins에서 동적으로 읽어옴
   //   (Firebase에 아무것도 없으면 amedtech@gmail.com을 fallback으로 사용)
-  const defaults = [
-    {email:'kyunghoyou@gmail.com', name:'유경호 (총괄)', role:'super'}
-  ];
+  const superEntry = {email:'kyunghoyou@gmail.com', name:'유경호 (총괄)', role:'super'};
 
-  // Firebase amt_admins 에서 일반관리자 추가 (총괄은 제외)
-  const serverAdmins = Object.values(data||{}).filter(a =>
-    a && a.email && a.email !== 'kyunghoyou@gmail.com'
-  );
+  // ★ Firebase에 총괄관리자 레코드가 있으면 code 등을 병합
+  const allServerAdmins = Object.values(data||{}).filter(a => a && a.email);
+  const serverSuper = allServerAdmins.find(a => a.email === 'kyunghoyou@gmail.com');
+  if(serverSuper){
+    Object.assign(superEntry, serverSuper);
+    // 이름은 고정값 유지 (서버값이 이상하게 바뀌어도 복원)
+    superEntry.name = '유경호 (총괄)';
+    superEntry.role = 'super';
+  }
+
+  const defaults = [superEntry];
+
+  // 일반관리자 (총괄 제외)
+  const serverAdmins = allServerAdmins.filter(a => a.email !== 'kyunghoyou@gmail.com');
 
   // 서버에 일반관리자가 한 명도 없으면 fallback(테스트 계정) 추가
   if(serverAdmins.length === 0){
@@ -8674,6 +8733,8 @@ async function saveOneAdminCode(origEmail, name){
       const oldKey = btoa(origEmail).replace(/[^a-zA-Z0-9]/g,'_');
       try{
         await fb.set(fb.ref(fb.db,'amt_admins/'+oldKey), null);
+        // 기존 이메일 인덱스 제거
+        await syncAdminEmailIndex(origEmail, false);
         console.log('기존 관리자 레코드 삭제:', origEmail);
       }catch(e){ console.warn('기존 레코드 삭제 실패:', e); }
     }
@@ -8684,6 +8745,9 @@ async function saveOneAdminCode(origEmail, name){
       email: newEmail, name:adminName, code:newCode, role,
       updatedAt: new Date().toISOString()
     });
+
+    // ★ admin_emails 인덱스 동기화 (새 이메일 등록)
+    await syncAdminEmailIndex(newEmail, true);
 
     if(saveBtn){
       saveBtn.disabled = false;
@@ -8735,6 +8799,8 @@ async function deleteAdminCode(email){
   if(!fb||!fb.ready){ alert('Firebase 미연결'); return; }
   const key = btoa(email).replace(/[^a-zA-Z0-9]/g,'_');
   await fb.set(fb.ref(fb.db,'amt_admins/'+key), null);
+  // ★ admin_emails 인덱스에서도 제거
+  await syncAdminEmailIndex(email, false);
   toast(email+' 삭제됨','info');
   loadAdminCodes();
 }
@@ -8783,6 +8849,9 @@ async function addAdminCode(){
       email, name, code, role: 'admin',
       updatedAt: new Date().toISOString()
     });
+
+    // ★ admin_emails 인덱스 동기화 (보안 규칙에서 참조)
+    await syncAdminEmailIndex(email, true);
 
     document.getElementById('newAdminName').value  = '';
     document.getElementById('newAdminEmail').value = '';
