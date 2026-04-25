@@ -2249,14 +2249,17 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
     <div class="setting-section">
       <h3>🔒 수입가격 입력 <span style="font-size:.72rem;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;margin-left:6px">총관리자 전용</span></h3>
       <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
-        수입가격을 입력하면 부가가치세 계산에 자동 반영됩니다.<br>
+        수입가격을 입력하면 부가가치세 매입세액 계산에 자동 반영됩니다.<br>
         이 정보는 총관리자(유경호)만 확인할 수 있습니다.
       </p>
       <div id="importPriceList">
         <div style="font-size:.8rem;color:var(--text3)">제품을 불러오는 중...</div>
       </div>
-      <div style="margin-top:12px;padding:10px 14px;background:#fef9c3;border-radius:8px;border:1px solid #fde047;font-size:.78rem;color:#713f12">
-        💡 수입가격 = 실제 수입 원가 (VAT 매입세액 계산 기준)
+      <div style="margin-top:12px;padding:12px 14px;background:#fef9c3;border-radius:8px;border:1px solid #fde047;font-size:.78rem;color:#713f12;line-height:1.6">
+        💡 <b>입력 기준: 수입신고필증의 "과세가격(원)" ÷ 수입수량</b><br>
+        • 과세가격 = CIF(제품가+운송비+보험료) + 관세<br>
+        • 매입세액 = 과세가격 × 10% (수입 시 세관에 납부한 부가세)<br>
+        • 이 매입세액은 매출세액에서 공제되어 실제 납부세액이 줄어듭니다
       </div>
     </div>
     </div>
@@ -7486,7 +7489,7 @@ function calcVatByCompany(startYm, endYm){
   // 기간 필터 함수
   const inPeriod = ds => ds >= startYm && ds <= endYm+'-31';
 
-  // KY 매출: orders (KY가 대리점에 판매)
+  // KY 매출: orders (KY가 대리점에 판매) — 반품은 orders에 음수 total로 포함됨 ✓
   const kyOrders = orders.filter(o => inPeriod(ym(o.orderDate)));
   const kyRevenue = kyOrders.reduce((s,o)=>s+orderAmount(o),0);
 
@@ -7495,10 +7498,25 @@ function calcVatByCompany(startYm, endYm){
     inPeriod(ym(t.date)) &&
     (t.type==='AMT_to_KY' || t.type==='AMT_to_BEST' || t.type==='ky_supply_AMT_KY')
   );
-  const amtRevenue = amtTx.reduce((s,t)=>s+t.amount,0);
+  let amtRevenue = amtTx.reduce((s,t)=>s+t.amount,0);
+
+  // ★ 반품 처리 (bestReturns에서 기간 내 반품 차감)
+  //   KY→AMT 반품: AMT 매출(내부거래) 차감 (KY가 받은 물건을 AMT에 반납)
+  //   AMT→BEST 반품: AMT 매출(BEST 판매) 차감 (BEST에게 판 물건을 반납받음)
+  //   ※ 반품가는 VAT포함가로 해석해 /11로 VAT 차감 (세무상 수정세금계산서 기준)
+  let amtReturnAmt = 0;
+  (bestReturns||[]).forEach(r => {
+    const ft = r.fromType || (r.from==='AMT' ? 'AMT_to_BEST' : r.from==='KY' ? 'KY_to_BEST' : '');
+    const d = r.date || r.createdAt || '';
+    if(!inPeriod(ym(d))) return;
+    if(ft === 'KY_to_AMT' || ft === 'AMT_to_BEST'){
+      amtReturnAmt += (Number(r.total)||0);
+    }
+  });
+  amtRevenue -= amtReturnAmt;
+  if(amtRevenue < 0) amtRevenue = 0;
 
   // BEST 매출: BEST가 외부에 판매한 건이 없으므로 txLogs KY_to_BEST + AMT_to_BEST 기준 매입액으로 추정
-  // (BEST는 AMT/KY로부터 물품 매입 후 판매 — 외부 매출 데이터 없으므로 매입액 기준 표시)
   const bestTx = txLogs.filter(t =>
     inPeriod(ym(t.date)) &&
     (t.type==='AMT_to_BEST' || t.type==='KY_to_BEST')
@@ -7513,9 +7531,9 @@ function calcVatByCompany(startYm, endYm){
   const importVatAmt = (typeof calcImportVat === 'function') ? calcImportVat(startYm, endYm) : 0;
 
   return {
-    AMT: { revenue: amtRevenue, supply: supplyAmt(amtRevenue), vat: vatAmt(amtRevenue), importVat: importVatAmt },
-    KY:  { revenue: kyRevenue,  supply: supplyAmt(kyRevenue),  vat: vatAmt(kyRevenue),  importVat: 0 },
-    BEST:{ revenue: bestRevenue,supply: supplyAmt(bestRevenue),vat: vatAmt(bestRevenue), importVat: 0 },
+    AMT: { revenue: amtRevenue, supply: supplyAmt(amtRevenue), vat: vatAmt(amtRevenue), importVat: importVatAmt, returnAmt: amtReturnAmt },
+    KY:  { revenue: kyRevenue,  supply: supplyAmt(kyRevenue),  vat: vatAmt(kyRevenue),  importVat: 0, returnAmt: 0 },
+    BEST:{ revenue: bestRevenue,supply: supplyAmt(bestRevenue),vat: vatAmt(bestRevenue), importVat: 0, returnAmt: 0 },
   };
 }
 
@@ -7541,16 +7559,26 @@ function renderVatKpiCards(){
     </div>
     ${companies.map(c=>{
       const d = vatData[c.key];
-      const actualVat = c.key==='AMT' && d.importVat>0 ? Math.max(0,d.vat-d.importVat) : d.vat;
+      const isSuper = (typeof isSuperAdmin === 'function') ? isSuperAdmin() : false;
+      // 수입매입세액은 총관리자만 차감 반영. 일반 관리자에게는 매출세액만 표시 (수입원가 역산 방지)
+      const useImportVat = (c.key==='AMT' && d.importVat>0 && isSuper);
+      const actualVat = useImportVat ? Math.max(0, d.vat - d.importVat) : d.vat;
       return `<div class="kpi" style="--kpi-color:${c.color};background:${c.bg}">
         <div class="kpi-label" style="color:${c.color}">🧾 ${c.label} 예상 납부세액</div>
         <div class="kpi-value" style="font-size:1.05rem;color:${c.color}">${fmt(actualVat)}</div>
-        ${c.key==='AMT' && d.importVat>0 ? `
+        ${useImportVat ? `
         <div style="font-size:.74rem;color:var(--text2);margin-top:3px">매출세액 ${fmt(d.vat)}원</div>
-        <div style="font-size:.74rem;color:#16a34a;font-weight:600">📦 수입매입세액 -${fmt(d.importVat)}원</div>
+        <div style="font-size:.74rem;color:#16a34a;font-weight:600" title="총관리자 전용 표시">🔒 수입매입세액 -${fmt(d.importVat)}원</div>
+        ` : ''}
+        ${c.key==='AMT' && d.returnAmt>0 ? `
+        <div style="font-size:.72rem;color:#dc2626;margin-top:2px">↩️ 반품 차감 -${fmt(d.returnAmt)}원</div>
         ` : ''}
         <div class="kpi-sub">공급가액 ${fmt(d.supply)}원 · 매출 ${fmt(d.revenue)}원</div>
-        <div style="font-size:.68rem;color:var(--text3);margin-top:2px">${c.key==='BEST'?'※매입기준 추정':c.key==='AMT'&&d.importVat>0?'매출세액-수입매입세액':'VAT포함 매출/11'}</div>
+        <div style="font-size:.68rem;color:var(--text3);margin-top:2px">${
+          c.key==='BEST' ? '※매입기준 추정'
+          : useImportVat ? '매출세액-수입매입세액(🔒)'
+          : 'VAT포함 매출/11'
+        }</div>
       </div>`;
     }).join('')}
   `;
@@ -9762,7 +9790,9 @@ function calcImportVat(startYm, endYm){
     const price = importPrices[i.product]||0;
     if(price > 0) totalImport += Math.abs(i.qty) * price;
   });
-  return Math.round(totalImport / 11); // 매입세액 (VAT 포함가의 1/11)
+  // ★ 매입세액 = 과세가격(CIF+관세) × 10%
+  //    수입가격 입력 기준: 수입신고필증의 "과세가격(원)" ÷ 수입수량 = 단가
+  return Math.round(totalImport * 0.1);
 }
 
 // ★ 총괄관리자 판별 - Firebase Auth 이메일 기반
