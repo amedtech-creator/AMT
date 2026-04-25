@@ -678,13 +678,23 @@ const DEALER_MASTER = {
 // ── 공급자 고정 정보 ─────────────────────────────────────────
 const KY_SUPPLIER = {
   regNo:"110-86-00994", name:"㈜케이와이메디칼",
-  ceo:"강승섭", address:"서울시 은평구 통일로87길 18-6, 2층"
+  ceo:"강승섭", address:"서울시 은평구 통일로87길 18-6, 2층",
+  // ★ 세금계산서 발행용 추가 정보
+  tel:"070-8699-8151",
+  hp:"010-3630-1076",
+  bizClass:"도매및 소매업",
+  bizType:"의료용기구 소매업"
 };
 
 // ★ AMT 법인 정보 (내부거래 AMT→KY 시 거래명세서/세금계산서 공급자로 사용)
 const AMT_SUPPLIER = {
   regNo:"110-81-99978", name:"(주)에이엠티코리아",
-  ceo:"염미정", address:"서울시 은평구 통일로87길 18-6"
+  ceo:"염미정", address:"서울시 은평구 통일로87길 18-6",
+  // ★ 세금계산서 발행용 추가 정보 (값은 AMT 정보 들어오면 갱신)
+  tel:"",
+  hp:"",
+  bizClass:"도매및 소매업",
+  bizType:"의료용기구 소매업"
 };
 
 // ★ KY 직인 이미지 (base64 임베드 - 외부 파일 의존성 없음)
@@ -708,7 +718,11 @@ function _getDealerMaster(dealerIdOrCode, dealerName) {
 // ═══════════════════════════════════════════════════════════════
 // ★ 택배비 강조 대상 대리점 (이름이 일치하면 빨간 박스로 강조)
 // ═══════════════════════════════════════════════════════════════
-const FEE_HIGHLIGHT_DEALERS = ['(주)서정메디케어', '서정메디케어', '엔케이바이오', '(주)엔케이바이오'];
+const FEE_HIGHLIGHT_DEALERS = [
+  '(주)서정메디케어', '서정메디케어',
+  '엔케이바이오', '(주)엔케이바이오',
+  '(주)베스트메디아', '베스트메디아'
+];
 
 function isFeeHighlightDealer(dealerName){
   if(!dealerName) return false;
@@ -732,7 +746,7 @@ function applyFeeHighlight(dealerName){
     group.style.borderRadius = '8px';
     group.style.padding = '8px 12px';
     label.style.padding = '0';
-    text.innerHTML = '🚨 <b style="color:#dc2626">택배비 포함 여부 반드시 확인</b>';
+    text.innerHTML = '🚨 <b style="color:#dc2626">택배비 포함 여부 반드시 확인</b> <span style="font-size:.78rem;color:#991b1b">(택배비포함시 ✔체크해주세요)</span>';
     text.style.fontSize = '1rem';
     hint.style.color = '#dc2626';
     hint.style.fontWeight = '600';
@@ -4807,12 +4821,12 @@ async function issueTaxInvoice(){
       CorpName: p.invoicer.name,
       CEOName: p.invoicer.ceo,
       Addr: p.invoicer.address,
-      BizClass: '도매업',
-      BizType: '의료기기',
+      BizClass: p.invoicer.bizClass || '도매및 소매업',
+      BizType: p.invoicer.bizType || '의료용기구 소매업',
       ContactID: 'amtkorea1',  // ★ AMT 파트너 바로빌 가입 ID
       ContactName: p.invoicer.ceo,
-      TEL: '02-0000-0000',
-      HP: '010-0000-0000',
+      TEL: p.invoicer.tel || '',
+      HP: p.invoicer.hp || '',
       Email: 'kyunghoyou@gmail.com'  // ★ AMT 파트너 가입 이메일
     },
     InvoiceeParty: {
@@ -4822,12 +4836,12 @@ async function issueTaxInvoice(){
       CorpName: p.invoicee.name,
       CEOName: p.invoicee.ceo,
       Addr: p.invoicee.address,
-      BizClass: '도매업',
-      BizType: '의료기기',
+      BizClass: p.invoicee.bizClass || '도매및 소매업',
+      BizType: p.invoicee.bizType || '의료용기구 소매업',
       ContactID: 'amtkorea',  // ★ KY 파트너 바로빌 가입 ID
       ContactName: p.invoicee.ceo,
-      TEL: '02-0000-0000',
-      HP: '010-0000-0000',
+      TEL: p.invoicee.tel || '',
+      HP: p.invoicee.hp || '',
       Email: 'amedtech@gmail.com'  // ★ KY 파트너 가입 이메일
     },
     TaxInvoiceTradeLineItems: {
@@ -8862,11 +8876,11 @@ function kyOpenAction(orderId, targetStatus){
           <div style="background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:14px 16px;margin-bottom:10px;box-shadow:0 0 0 3px rgba(220,38,38,0.1)">
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:1.05rem;font-weight:700;color:#dc2626">
               <input type="checkbox" id="kyShipFeeInclude" ${defaultChecked} style="width:24px;height:24px;cursor:pointer;accent-color:#dc2626">
-              <span>🚨 택배비 포함 명세서 발송 (반드시 확인!)</span>
+              <span>🚨 택배비 포함 여부 반드시 확인 <span style="font-size:.85rem;font-weight:600">(택배비포함시 ✔체크해주세요)</span></span>
             </label>
             <div style="font-size:.82rem;color:#991b1b;margin-top:8px;padding-left:34px;font-weight:600">
-              ⚠️ <b>${o.dealerName}</b> 은(는) 택배비 처리에 주의가 필요한 대리점입니다.<br>
-              택배비 ${fmt(dealerFee||(o.fee||0))}원 포함 여부를 정확히 확인하세요.
+              ⚠️ <b>${o.dealerName}</b> 은(는) 택배비 처리에 주의가 필요합니다<br>
+              <span style="font-weight:500">택배비 ${fmt(dealerFee||(o.fee||0))}원 포함 여부를 정확히 확인하세요.</span>
             </div>
           </div>`;
       } else {
@@ -11065,17 +11079,17 @@ async function issueBarobillFromTaxModal() {
     // ★ 공급자: KY (인증키 소유자 - partner='KY' 사용)
     InvoicerParty: {
       MgtNum: mgtNum,  // ★ 발주ID 기반 결정적 관리번호 (영문+숫자)
-      CorpNum: '1108600994',  // KY 사업자번호
+      CorpNum: KY_SUPPLIER.regNo.replace(/-/g,''),
       TaxRegID: '',
-      CorpName: '(주)케이와이메디칼',
-      CEOName: '강승섭',
-      Addr: '서울시 은평구 통일로87길 18-6, 2층',
-      BizClass: '도매업',
-      BizType: '의료기기',
+      CorpName: KY_SUPPLIER.name,
+      CEOName: KY_SUPPLIER.ceo,
+      Addr: KY_SUPPLIER.address,
+      BizClass: KY_SUPPLIER.bizClass || '도매및 소매업',
+      BizType: KY_SUPPLIER.bizType || '의료용기구 소매업',
       ContactID: 'amtkorea',  // ★ KY 파트너 바로빌 가입 ID
-      ContactName: '강승섭',
-      TEL: '02-0000-0000',
-      HP: '010-0000-0000',
+      ContactName: KY_SUPPLIER.ceo,
+      TEL: KY_SUPPLIER.tel || '',
+      HP: KY_SUPPLIER.hp || '',
       Email: 'amedtech@gmail.com'  // ★ KY 파트너 가입 이메일
     },
     // ★ 공급받는자: 대리점 (바로빌 미가입이어도 OK)
