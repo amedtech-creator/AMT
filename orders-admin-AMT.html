@@ -776,6 +776,11 @@ function getDealerInfo(dealerOrIdOrCode, dealerNameFallback, options) {
     // ★ 세금계산서 수신 이메일 - 미설정 시 로그인 이메일(email) 폴백
     taxEmail: (d && d.taxEmail) || (d && d.email) || master?.email || '',
     address: addressRaw,
+    // ★ 세금계산서용 추가 필드 (없으면 빈 문자열 또는 기본값)
+    tel: (d && d.tel) || '',
+    hp: (d && d.hp) || '',
+    bizClass: (d && d.bizClass) || '도매업',
+    bizType: (d && d.bizType) || '의료기기',
     products: productsMap,
     // 원본 참조
     _source: d ? 'dealers' : (master ? 'DEALER_MASTER' : 'none'),
@@ -2400,6 +2405,26 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
       <div class="form-group" style="flex:1;min-width:100%">
         <label>사업장 주소</label>
         <input type="text" id="dmAddress" placeholder="서울시 ...">
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>사업장 전화 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(세금계산서)</span></label>
+        <input type="text" id="dmTel" placeholder="02-0000-0000">
+      </div>
+      <div class="form-group">
+        <label>담당자 휴대폰 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(선택)</span></label>
+        <input type="text" id="dmHp" placeholder="010-0000-0000">
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>업태 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(기본: 도매업)</span></label>
+        <input type="text" id="dmBizClass" placeholder="도매업">
+      </div>
+      <div class="form-group">
+        <label>종목 <span style="font-size:.7rem;color:var(--text3);font-weight:400">(기본: 의료기기)</span></label>
+        <input type="text" id="dmBizType" placeholder="의료기기">
       </div>
     </div>
 
@@ -5933,6 +5958,10 @@ function openDealerModal(id=null){
   document.getElementById('dmRegNo').value='';
   document.getElementById('dmCeo').value='';
   document.getElementById('dmAddress').value='';
+  document.getElementById('dmTel').value='';
+  document.getElementById('dmHp').value='';
+  document.getElementById('dmBizClass').value='';
+  document.getElementById('dmBizType').value='';
   document.getElementById('dmProducts').innerHTML='';
 
   if(id){
@@ -5962,6 +5991,11 @@ function openDealerModal(id=null){
       // address는 DEALER_MASTER에서 <br>을 쓰므로 평문으로 변환
       const addrRaw = d.address || (fallback?.address||'');
       document.getElementById('dmAddress').value = addrRaw.replace(/<br\s*\/?>/gi,', ').replace(/\s+/g,' ').trim();
+      // ★ 신규: 세금계산서용 추가 필드 (tel/hp/bizClass/bizType)
+      document.getElementById('dmTel').value = d.tel || '';
+      document.getElementById('dmHp').value = d.hp || '';
+      document.getElementById('dmBizClass').value = d.bizClass || '';
+      document.getElementById('dmBizType').value = d.bizType || '';
       // 제품 로드 - catNo도 함께
       d.products.forEach(p => {
         const fallbackCatNo = fallback?.products?.[p.product]?.catNo || '';
@@ -6176,6 +6210,11 @@ async function _doSaveDealer(){
   const regNo = document.getElementById('dmRegNo').value.trim();
   const ceo = document.getElementById('dmCeo').value.trim();
   const address = document.getElementById('dmAddress').value.trim();
+  // ★ 신규 - 세금계산서용 추가 필드 (tel/hp/bizClass/bizType)
+  const tel = document.getElementById('dmTel').value.trim();
+  const hp = document.getElementById('dmHp').value.trim();
+  const bizClass = document.getElementById('dmBizClass').value.trim();
+  const bizType = document.getElementById('dmBizType').value.trim();
 
   if(!name){ toast('대리점명을 입력하세요','error'); return; }
   if(!email){ toast('로그인 이메일을 입력하세요 (필수)','error'); return; }
@@ -6210,7 +6249,7 @@ async function _doSaveDealer(){
     addAuditLog('edit','대리점',`수정: ${d.name} → ${name} (이메일: ${email})`);
     const finalCode = code || d.code || '';
     const oldEmail = d.email;
-    Object.assign(d,{name,email,statementEmail,taxEmail,code:finalCode,term,fee,note,products:prods,regNo,ceo,address});
+    Object.assign(d,{name,email,statementEmail,taxEmail,code:finalCode,term,fee,note,products:prods,regNo,ceo,address,tel,hp,bizClass,bizType});
     d._v = Date.now(); // ★ Fix: 병합 시 이 변경이 최신임을 보장
     await fbSaveDoc('dealers',d.id,d);
     // ★ 이메일이 바뀌었거나 새 이메일이면 Auth 계정 생성 (더미PW)
@@ -6224,7 +6263,7 @@ async function _doSaveDealer(){
       toast('✅ 코드 변경됨 - 즉시 다음 로그인부터 적용','info');
     }
   } else {
-    const d={id:'d_'+Date.now(),name,email,statementEmail,taxEmail,code,term,fee,note,products:prods,regNo,ceo,address,_v:Date.now()};
+    const d={id:'d_'+Date.now(),name,email,statementEmail,taxEmail,code,term,fee,note,products:prods,regNo,ceo,address,tel,hp,bizClass,bizType,_v:Date.now()};
     dealers.push(d);
     addAuditLog('create','대리점',`추가: ${name} (이메일: ${email})`);
     await fbSaveDoc('dealers',d.id,d);
@@ -10706,6 +10745,13 @@ function openTaxModal(data) {
           <div style="color:var(--text2)">등록번호: ${data.dealerRegNo||'(미등록)'}</div>
           <div style="color:var(--text2)">대표자: ${data.dealerCeo||'(미등록)'}</div>
           <div style="color:var(--text2);font-size:.75rem">${data.dealerAddr||'(미등록)'}</div>
+          <div style="color:var(--text2);font-size:.75rem;margin-top:4px">
+            업태: ${data.dealerBizClass||'도매업'} / 종목: ${data.dealerBizType||'의료기기'}
+          </div>
+          <div style="color:var(--text2);font-size:.75rem">
+            ${data.dealerTel ? '☎ '+data.dealerTel : '<span style="color:#c00">☎ 전화번호 미입력</span>'}
+            ${data.dealerHp ? ' / 📱 '+data.dealerHp : ''}
+          </div>
         </div>
       </div>
     </div>
@@ -10909,12 +10955,12 @@ async function issueBarobillFromTaxModal() {
       CorpName: data.dealerName || '',
       CEOName: data.dealerCeo || '',
       Addr: data.dealerAddr || '',
-      BizClass: '도매업',
-      BizType: '의료기기',
+      BizClass: data.dealerBizClass || '도매업',
+      BizType: data.dealerBizType || '의료기기',
       ContactID: '',  // ★ 대리점은 바로빌 미가입이므로 비움
       ContactName: data.dealerCeo || '',
-      TEL: '02-0000-0000',
-      HP: '010-0000-0000',
+      TEL: data.dealerTel || '',
+      HP: data.dealerHp || '',
       Email: data.dealerEmail || ''  // ★ 대리점 세금계산서 수신 이메일
     },
     TaxInvoiceTradeLineItems: {
@@ -11027,6 +11073,11 @@ function buildTaxDataFromKyOrder(order, includeDeliveryFee) {
     dealerCeo:   info?.ceo || '',
     dealerAddr:  (info?.address || '').replace(/<br\s*\/?>/gi,', '),
     dealerEmail: info?.taxEmail || info?.email || '',
+    // ★ 신규: 세금계산서 페이로드에 사용
+    dealerTel: info?.tel || '',
+    dealerHp: info?.hp || '',
+    dealerBizClass: info?.bizClass || '도매업',
+    dealerBizType: info?.bizType || '의료기기',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
@@ -11058,6 +11109,11 @@ function buildTaxDataFromAmtOrder(order, dealer, includeDeliveryFee) {
     dealerCeo:   info?.ceo || dealer.ceo || '',
     dealerAddr:  ((info?.address || dealer.address) || '').replace(/<br\s*\/?>/gi,', '),
     dealerEmail: info?.taxEmail || info?.email || dealer.taxEmail || dealer.email || '',
+    // ★ 신규: 세금계산서 페이로드에 사용
+    dealerTel: info?.tel || dealer.tel || '',
+    dealerHp: info?.hp || dealer.hp || '',
+    dealerBizClass: info?.bizClass || dealer.bizClass || '도매업',
+    dealerBizType: info?.bizType || dealer.bizType || '의료기기',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
@@ -11097,6 +11153,11 @@ function buildTaxDataFromAmtOrderGroup(groupOrder, dealer, includeDeliveryFee) {
     dealerCeo:   info?.ceo || dealer.ceo || '',
     dealerAddr:  ((info?.address || dealer.address) || '').replace(/<br\s*\/?>/gi,', '),
     dealerEmail: info?.taxEmail || info?.email || dealer.taxEmail || dealer.email || '',
+    // ★ 신규: 세금계산서 페이로드에 사용
+    dealerTel: info?.tel || dealer.tel || '',
+    dealerHp: info?.hp || dealer.hp || '',
+    dealerBizClass: info?.bizClass || dealer.bizClass || '도매업',
+    dealerBizType: info?.bizType || dealer.bizType || '의료기기',
     issueDate, items, total, supplyAmt, taxAmt
   };
 }
