@@ -7403,9 +7403,21 @@ function _showImportPicker(data){
             <b>재고조정 자동 변환</b> <span style="color:var(--text2)">(OLD의 adjust를 신규 delta 모드로)</span>
           </label>
         </div>
-        <div style="padding:0 12px;font-size:.7rem;color:var(--text3);line-height:1.5">
+        <div style="padding:0 12px;font-size:.7rem;color:var(--text3);line-height:1.5;margin-bottom:8px">
           ※ OLD VERSION의 adjust 이력은 <b>누적식(delta)</b>으로 변환됩니다.<br>
           &nbsp; 만약 OLD에서 절대값으로 썼다면 체크 해제하세요.
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fef2f2;border:1.5px solid #dc2626;border-radius:8px;margin-bottom:8px">
+          <input type="checkbox" id="impClearTombstones" style="width:auto;margin:0;cursor:pointer">
+          <label for="impClearTombstones" style="font-size:.78rem;cursor:pointer;flex:1;font-weight:700;color:#dc2626">
+            ⚠️ 삭제 기록 무시 (강제 복원 모드)
+          </label>
+        </div>
+        <div style="padding:0 12px;font-size:.7rem;color:var(--text3);line-height:1.5">
+          ※ 백업 파일에 있던 항목이 <b>현재 시스템에서 삭제된 상태</b>라면<br>
+          &nbsp; 일반 임포트로는 복원 안 됨 (tombstones 때문). 이 옵션을 체크하세요.<br>
+          &nbsp; <b style="color:#dc2626">주의</b>: 의도적으로 삭제한 항목이 다시 살아납니다.
         </div>
       </div>
       <div style="padding:14px 24px;border-top:1px solid var(--border);background:#f8f9fc;display:flex;gap:8px;justify-content:flex-end">
@@ -7440,13 +7452,46 @@ async function _executeSelectiveImport(){
   });
 
   const convertAdjust = document.getElementById('impConvertAdjust')?.checked;
+  const clearTombstones = document.getElementById('impClearTombstones')?.checked;
 
   // 선택 확인
   const selectedList = Object.entries(selected).filter(([k,v])=>v).map(([k])=>k);
   if(selectedList.length === 0){ toast('최소 1개 이상 선택하세요','error'); return; }
-  if(!confirm(`다음 ${selectedList.length}개 항목을 가져옵니다:\n\n${selectedList.join(', ')}\n\n선택 안 한 항목은 현재 상태가 유지됩니다. 계속하시겠습니까?`)) return;
+  
+  let confirmMsg = `다음 ${selectedList.length}개 항목을 가져옵니다:\n\n${selectedList.join(', ')}\n\n선택 안 한 항목은 현재 상태가 유지됩니다.`;
+  if(clearTombstones){
+    confirmMsg += `\n\n⚠️ 삭제 기록 무시 모드 활성화\n→ 시스템에서 삭제했던 항목도 백업 파일에서 복원됩니다.`;
+  }
+  confirmMsg += `\n\n계속하시겠습니까?`;
+  if(!confirm(confirmMsg)) return;
 
   try{
+    // ★ 강제 복원 모드: 임포트할 항목들의 ID를 tombstones에서 제거
+    if(clearTombstones){
+      const idsToRevive = new Set();
+      ['orders','invLogs','internalTrades','txLogs','kyReturns','bestReturns','dealers'].forEach(kind => {
+        if(selected[kind] && Array.isArray(data[kind])){
+          data[kind].forEach(item => { if(item && item.id) idsToRevive.add(kind+':'+item.id); });
+        }
+      });
+      // tombstones 객체에서 해당 ID 제거
+      if(tombstones && typeof tombstones === 'object'){
+        Object.keys(tombstones).forEach(kind => {
+          if(!tombstones[kind]) return;
+          Object.keys(tombstones[kind]).forEach(id => {
+            if(idsToRevive.has(kind+':'+id)){
+              delete tombstones[kind][id];
+            }
+          });
+        });
+      }
+      // sessionStorage 삭제 추적도 클리어
+      ['orders','invLogs','dealers','internalTrades','txLogs','bestReturns','kyReturns'].forEach(k => {
+        if(typeof _clearDeleted === 'function') _clearDeleted(k);
+      });
+      console.log('[임포트] 삭제 기록 클리어 완료. 복원 대상:', idsToRevive.size, '건');
+    }
+    
     // 실제 적용
     if(selected.orders && Array.isArray(data.orders)) orders = data.orders;
     if(selected.invLogs && Array.isArray(data.invLogs)){
@@ -7457,27 +7502,46 @@ async function _executeSelectiveImport(){
         if(convertAdjust && i.type === 'adjust' && !i.adjustMode){
           i.adjustMode = 'delta';
         }
+        // ★ 강제 복원 모드: _v를 현재 시간으로 갱신해서 서버 데이터를 이김
+        if(clearTombstones){
+          i._v = Date.now() + Math.random();
+        }
       });
     }
-    if(selected.internalTrades && Array.isArray(data.internalTrades)) internalTrades = data.internalTrades;
-    if(selected.txLogs && Array.isArray(data.txLogs)) txLogs = data.txLogs;
-    if(selected.kyReturns && Array.isArray(data.kyReturns)) kyReturns = data.kyReturns;
-    if(selected.bestReturns && Array.isArray(data.bestReturns)) bestReturns = data.bestReturns;
+    if(selected.internalTrades && Array.isArray(data.internalTrades)){
+      internalTrades = data.internalTrades;
+      if(clearTombstones) internalTrades.forEach(t => { t._v = Date.now() + Math.random(); });
+    }
+    if(selected.txLogs && Array.isArray(data.txLogs)){
+      txLogs = data.txLogs;
+      if(clearTombstones) txLogs.forEach(t => { t._v = Date.now() + Math.random(); });
+    }
+    if(selected.kyReturns && Array.isArray(data.kyReturns)){
+      kyReturns = data.kyReturns;
+      if(clearTombstones) kyReturns.forEach(t => { t._v = Date.now() + Math.random(); });
+    }
+    if(selected.bestReturns && Array.isArray(data.bestReturns)){
+      bestReturns = data.bestReturns;
+      if(clearTombstones) bestReturns.forEach(t => { t._v = Date.now() + Math.random(); });
+    }
     if(selected.products && Array.isArray(data.products)) products = data.products;
-    if(selected.dealers && Array.isArray(data.dealers)) dealers = data.dealers;
+    if(selected.dealers && Array.isArray(data.dealers)){
+      dealers = data.dealers;
+      if(clearTombstones) dealers.forEach(t => { t._v = Date.now() + Math.random(); });
+    }
 
     saveLS();
     if(window._fb && window._fb.ready){
       await fbSaveAll();
     }
 
-    addAuditLog('edit','데이터',`JSON 가져오기: ${selectedList.join(', ')}${convertAdjust?' (adjust→delta 변환)':''}`);
+    addAuditLog('edit','데이터',`JSON 가져오기: ${selectedList.join(', ')}${convertAdjust?' (adjust→delta 변환)':''}${clearTombstones?' (강제 복원 모드)':''}`);
 
     // 정리
     delete window._pendingImportData;
     document.getElementById('importPickerModal').remove();
 
-    toast(`✅ ${selectedList.length}개 항목 가져오기 완료`,'success');
+    toast(`✅ ${selectedList.length}개 항목 가져오기 완료${clearTombstones?' (강제 복원)':''}`,'success');
     refreshAll();
   }catch(err){
     toast('❌ 가져오기 실패: '+err.message,'error');
