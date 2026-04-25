@@ -2296,14 +2296,17 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
     <div id="histResendBody" style="padding:0 4px 8px;font-size:.85rem">
       <!-- 동적 채움 -->
     </div>
-    <div class="form-group">
-      <label>수신 이메일 <span class="req">*</span></label>
-      <input type="email" id="histResendEmail" placeholder="example@domain.com">
-      <p style="font-size:.72rem;color:#888;margin-top:4px">기본값은 원래 수신자 이메일입니다. 다른 주소로 재발송하려면 수정하세요.</p>
+    <div class="form-group" style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin-top:8px">
+      <label style="font-weight:700;color:#854d0e">📮 재발송할 이메일 주소 <span class="req">*</span></label>
+      <input type="email" id="histResendEmail" placeholder="example@domain.com" style="margin-top:6px;font-size:.95rem">
+      <p style="font-size:.75rem;color:#92400e;margin-top:6px;line-height:1.4">
+        💡 기본값은 원래 수신자 이메일입니다.<br>
+        다른 주소(예: 본인 이메일)로 보내려면 위 칸을 수정하세요.
+      </p>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
       <button class="btn btn-ghost btn-sm" onclick="closeHistResendModal()">취소</button>
-      <button class="btn btn-primary btn-sm" id="histResendBtn" onclick="confirmResendStatement()">재발송</button>
+      <button class="btn btn-primary btn-sm" id="histResendBtn" onclick="confirmResendStatement()">📧 재발송</button>
     </div>
     <div id="histResendStatus" style="margin-top:10px;font-size:.78rem"></div>
   </div>
@@ -10648,8 +10651,6 @@ if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
     <div id="taxBarobillStatus" style="display:none;margin:0 24px 14px;padding:12px;border-radius:8px;font-size:.85rem"></div>
     <!-- 하단 버튼 -->
     <div style="padding:12px 24px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-      <button onclick="openHometax()" class="btn btn-ghost" style="padding:9px 14px;font-size:.8rem">🏛️ 홈택스</button>
-      <button onclick="copyAllTax()" class="btn btn-ghost" style="padding:9px 14px;font-size:.8rem">📋 복사</button>
       <button onclick="closeTaxModal()" class="btn btn-secondary" style="padding:9px 14px;font-size:.85rem">취소</button>
       <button id="taxBarobillIssueBtn" onclick="issueBarobillFromTaxModal()" class="btn btn-primary" style="background:#d97706;border-color:#d97706;padding:9px 20px;font-size:.9rem;font-weight:700">🧾 바로빌 발행</button>
     </div>
@@ -11425,11 +11426,14 @@ function exportHistoryCsv(){
 
 // 재발송 모달 열기
 function openResendModal(logId){
+  console.log('[재발송] 클릭 - logId:', logId, '| 보유 이력:', (window._hist.rows||[]).length, '건');
   const row = (window._hist.rows||[]).find(r => r.id === logId && r.source === 'statement');
   if(!row){
-    if(typeof toast === 'function') toast('이력을 찾을 수 없습니다','error');
+    console.warn('[재발송] 일치하는 이력 없음. logId=', logId);
+    if(typeof toast === 'function') toast('이력을 찾을 수 없습니다 (콘솔 확인)','error');
     return;
   }
+  console.log('[재발송] 대상:', row.dealerName, '/', row.orderId, '/', row.amount, '원');
   window._hist.resendTarget = row;
 
   const body = document.getElementById('histResendBody');
@@ -11456,12 +11460,20 @@ function openResendModal(logId){
   if(btn){ btn.disabled = false; btn.textContent = '재발송'; }
 
   const modal = document.getElementById('histResendModal');
-  if(modal) modal.classList.add('active');
+  if(!modal){
+    console.error('[재발송] histResendModal DOM 없음');
+    if(typeof toast === 'function') toast('재발송 모달을 찾을 수 없습니다','error');
+    return;
+  }
+  modal.classList.add('open');
+  console.log('[재발송] 모달 열림. 수신 이메일 입력 후 재발송 버튼 클릭하세요.');
+  // 이메일 입력 칸에 자동 포커스 (사용자가 바로 수정 가능)
+  setTimeout(() => { if(emailEl) emailEl.focus(); }, 100);
 }
 
 function closeHistResendModal(){
   const modal = document.getElementById('histResendModal');
-  if(modal) modal.classList.remove('active');
+  if(modal) modal.classList.remove('open');
   window._hist.resendTarget = null;
 }
 
