@@ -1472,8 +1472,8 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
           </select>
         </div>
         <div class="form-group">
-          <label>수량 <span class="req">*</span></label>
-          <input type="text" inputmode="numeric" id="kySupplyQty" placeholder="0" oninput="fmtInput(this);kySupplyCalc()">
+          <label>수량 <span class="req">*</span> <span style="font-size:.68rem;color:#dc2626;font-weight:600">(반품: 음수 입력 예: -3)</span></label>
+          <input type="text" inputmode="numeric" id="kySupplyQty" placeholder="0 (반품은 -3 처럼 음수)" oninput="fmtInput(this);kySupplyCalc()">
         </div>
       </div>
       <div class="form-grid">
@@ -5007,17 +5007,22 @@ function renderInternalList(){
       <tbody>
       ${list.map(t=>{
         const c=pColors[t.product]||'var(--gray)';
-        return `<tr>
+        const isReturn = (t.qty||0) < 0;
+        const rowStyle = isReturn ? 'background:#fef2f2' : '';
+        const dirArrow = isReturn ? '←' : '→';
+        const dirColor = isReturn ? 'var(--red)' : 'var(--internal)';
+        const tagHtml = isReturn ? '<span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:8px;font-size:.65rem;font-weight:700;margin-right:4px">반품</span>' : '';
+        return `<tr style="${rowStyle}">
           <td class="td-mono">${t.date}</td>
           <td>
-            <span class="company-badge-amt">AMT</span>
-            <span style="margin:0 4px;color:var(--internal);font-weight:700">→</span>
+            ${tagHtml}<span class="company-badge-amt">AMT</span>
+            <span style="margin:0 4px;color:${dirColor};font-weight:700">${dirArrow}</span>
             <span class="company-badge-ky">KY</span>
           </td>
           <td><span class="badge" style="background:${c}20;color:${c}">${t.product}</span></td>
-          <td class="td-mono td-r">${fmt(t.qty)}</td>
+          <td class="td-mono td-r"${isReturn?' style="color:#dc2626;font-weight:700"':''}>${fmt(t.qty)}</td>
           <td class="td-mono td-r">${fmt(t.price)}</td>
-          <td class="td-mono td-r" style="font-weight:700;color:var(--internal)">${fmt(t.total)}</td>
+          <td class="td-mono td-r" style="font-weight:700;color:${isReturn?'#dc2626':'var(--internal)'}">${fmt(t.total)}</td>
           <td style="font-size:.75rem;color:var(--text2)">${t.memo||''}</td>
         </tr>`;
       }).join('')}
@@ -5304,7 +5309,15 @@ async function saveKySupply(){
   const memo = (document.getElementById('kySupplyMemo')||{}).value||'';
   const total = qty * price;
 
-  if(!date||!prod||qty<=0||price<=0){ toast('날짜·제품·수량·단가를 입력하세요','error'); return; }
+  // ★ 검증: 수량 0은 거부, 음수는 반품 처리로 허용
+  if(!date||!prod||qty===0||price<=0){ toast('날짜·제품·수량(0 제외)·단가를 입력하세요','error'); return; }
+
+  // ★ 음수 수량(반품) 처리 안내
+  const isReturn = qty < 0;
+  if(isReturn){
+    const ok = confirm(`반품 처리 확인\n\n${prod} ${fmt(Math.abs(qty))}개 반품 (KY → AMT)\n\n• AMT 재고: +${fmt(Math.abs(qty))} (반품 입고)\n• KY 재고: -${fmt(Math.abs(qty))} (반품 출고)\n• 채권/채무: AMT가 KY에게 ${fmt(Math.abs(total))}원 반환\n\n진행하시겠습니까?`);
+    if(!ok) return;
+  }
 
   // internalPrices 업데이트 (사용자가 단가 수정한 경우)
   if(price !== internalPrices[prod]){
@@ -5316,19 +5329,25 @@ async function saveKySupply(){
   const trade = {id, date, product:prod, qty, price, total, memo, createdAt:new Date().toISOString()};
   internalTrades.push(trade);
 
-  // AMT 재고 출고
-  invLogs.push({id:'inv_'+Date.now()+'_a', date, product:prod, qty:-qty, type:'out',
-    company:'AMT', memo:'내부공급→KY'+(memo?' ('+memo+')':''), relInternal:id, createdAt:new Date().toISOString()});
-  // KY 재고 입고
-  invLogs.push({id:'inv_'+(Date.now()+1)+'_k', date, product:prod, qty:qty, type:'in',
-    company:'KY', memo:'내부공급←AMT'+(memo?' ('+memo+')':''), relInternal:id, createdAt:new Date().toISOString()});
+  // ★ AMT 재고: qty 음수면 반품(입고+), 양수면 공급(출고-)
+  //   invLogs의 qty는 +공급, -공급 (재고증감 부호로)
+  //   기존: 공급 시 AMT는 -qty (출고), KY는 +qty (입고)
+  //   반품 시: qty가 음수이므로 자동으로 AMT는 +(입고), KY는 -(출고)
+  const returnTag = isReturn ? '[반품] ' : '';
+  invLogs.push({id:'inv_'+Date.now()+'_a', date, product:prod, qty:-qty, type:(isReturn?'in':'out'),
+    company:'AMT', memo:returnTag+(isReturn?'KY→AMT 반품':'내부공급→KY')+(memo?' ('+memo+')':''), relInternal:id, createdAt:new Date().toISOString()});
+  invLogs.push({id:'inv_'+(Date.now()+1)+'_k', date, product:prod, qty:qty, type:(isReturn?'out':'in'),
+    company:'KY', memo:returnTag+(isReturn?'AMT로 반품':'내부공급←AMT')+(memo?' ('+memo+')':''), relInternal:id, createdAt:new Date().toISOString()});
 
-  // txLogs에도 추가 → relInternal로 invLogs/internalTrades 연결
+  // ★ txLogs: amount는 total 그대로 (음수면 자동 반전)
+  //   AMT_to_KY +총액: AMT 채권 증가
+  //   AMT_to_KY -총액(반품): AMT 채권 감소 = AMT 채무, KY 채권 발생
   const txId='tx_'+(Date.now()+2);
-  txLogs.push({id:txId, date, type:'AMT_to_KY', amount:total, memo:(prod+' '+fmt(qty)+'개'+(memo?' ('+memo+')':'')), relInternal:id, createdAt:new Date().toISOString()});
-  addAuditLog('create','내부거래','AMT→KY '+prod+' '+fmt(qty)+'개 '+fmt(total)+'원 ('+date+')');
+  const txMemo = returnTag + prod + ' ' + fmt(Math.abs(qty)) + '개' + (isReturn?' 반품':'') + (memo?' ('+memo+')':'');
+  txLogs.push({id:txId, date, type:'AMT_to_KY', amount:total, memo:txMemo, relInternal:id, createdAt:new Date().toISOString()});
+  addAuditLog('create','내부거래', returnTag+'AMT→KY '+prod+' '+fmt(qty)+'개 '+fmt(total)+'원 ('+date+')');
   saveLS(); await fbSaveAll();
-  toast('AMT→KY 물품공급 저장! '+prod+' '+fmt(qty)+'개','success');
+  toast(returnTag+'AMT→KY '+(isReturn?'반품':'물품공급')+' 저장! '+prod+' '+fmt(Math.abs(qty))+'개','success');
 
   document.getElementById('kySupplyQty').value='';
   document.getElementById('kySupplyTotal').value='';
@@ -5337,12 +5356,15 @@ async function saveKySupply(){
   if(msgEl){ msgEl.textContent='저장됨 · '+date; setTimeout(()=>msgEl.textContent='',3000); }
   renderDebtSummary(); renderInternalList(); renderInvCards(); renderInvHistory();
 
-  // ★ AMT→KY 물품공급 저장 후 → 전자세금계산서 발행 미리보기 팝업 표시
-  //   AMT(공급자) → KY(공급받는자) 과세 세금계산서
-  showTaxInvoicePreview({
-    tradeId: id,
-    date, product: prod, qty, price, total
-  });
+  // ★ 세금계산서 미리보기: 반품(음수)인 경우는 마이너스 세금계산서이므로 별도 안내
+  if(isReturn){
+    toast('💡 반품은 마이너스 세금계산서로 별도 발행하세요','info');
+  } else {
+    showTaxInvoicePreview({
+      tradeId: id,
+      date, product: prod, qty, price, total
+    });
+  }
 }
 
 
@@ -8285,7 +8307,8 @@ function closeRecModal(){ document.getElementById('recModal').classList.remove('
    COMMA INPUT UTILS
 ═══════════════════════════════════════════════════════ */
 function fmtInput(el){
-  const allowMinus = el.id && el.id.startsWith('adjAmt_');
+  // ★ 마이너스 허용 입력란: 채무조정(adjAmt_*) + AMT→KY 물품공급 수량(kySupplyQty, 반품 처리용)
+  const allowMinus = el.id && (el.id.startsWith('adjAmt_') || el.id === 'kySupplyQty');
   if(allowMinus){
     const isNeg = el.value.trimStart().startsWith('-');
     const raw = el.value.replace(/[^0-9]/g,'');
