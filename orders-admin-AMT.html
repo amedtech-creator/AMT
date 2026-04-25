@@ -7047,9 +7047,27 @@ function _mergeImportPrices(remote){
 function _mergeRemoteAll(remote){
   if(!remote || typeof remote !== 'object') return;
 
-  // ★★★ 먼저 tombstones 합치기 (이후 _mergeArrByV가 이걸 참조하여 삭제된 항목을 제외)
+  // ★★★ 강제 복원 모드: 부활시킨 ID들이 서버 tombstones에 살아있어도 다시 흡수하지 않음
+  //    임포트 직후 _suppressRevivedTombstones에 ID set이 들어있으면, 그 ID들을 원격 tombstones에서 빼고 머지
+  const supSet = window._suppressRevivedTombstones; // {kind: Set<id>} 또는 null
   if(remote.tombstones){
-    _mergeTombstones(remote.tombstones);
+    if(supSet){
+      // 원격 tombstones를 deep copy 후 부활 ID들 제거
+      const filtered = {};
+      Object.keys(remote.tombstones).forEach(kind => {
+        const rt = remote.tombstones[kind];
+        if(!rt || typeof rt !== 'object') return;
+        const skip = supSet[kind];
+        if(!skip || skip.size === 0){ filtered[kind] = rt; return; }
+        const copy = {};
+        Object.keys(rt).forEach(id => { if(!skip.has(id)) copy[id] = rt[id]; });
+        filtered[kind] = copy;
+      });
+      _mergeTombstones(filtered);
+    } else {
+      // ★★★ 먼저 tombstones 합치기 (이후 _mergeArrByV가 이걸 참조하여 삭제된 항목을 제외)
+      _mergeTombstones(remote.tombstones);
+    }
   }
 
   _mergeArrByV(orders, remote.orders, 'orders');
@@ -7467,11 +7485,19 @@ async function _executeSelectiveImport(){
 
   try{
     // ★ 강제 복원 모드: 임포트할 항목들의 ID를 tombstones에서 제거
+    let _idsToReviveByKind = null; // 서버 tombstones 직접 삭제용 (강제복원 모드일 때만)
     if(clearTombstones){
       const idsToRevive = new Set();
+      _idsToReviveByKind = {}; // {kind: Set<id>}
       ['orders','invLogs','internalTrades','txLogs','kyReturns','bestReturns','dealers'].forEach(kind => {
         if(selected[kind] && Array.isArray(data[kind])){
-          data[kind].forEach(item => { if(item && item.id) idsToRevive.add(kind+':'+item.id); });
+          _idsToReviveByKind[kind] = new Set();
+          data[kind].forEach(item => {
+            if(item && item.id){
+              idsToRevive.add(kind+':'+item.id);
+              _idsToReviveByKind[kind].add(item.id);
+            }
+          });
         }
       });
       // tombstones 객체에서 해당 ID 제거
@@ -7484,12 +7510,14 @@ async function _executeSelectiveImport(){
             }
           });
         });
+        // localStorage의 tombstones도 즉시 갱신
+        try{ localStorage.setItem('amt_tombstones', JSON.stringify(tombstones)); }catch(e){}
       }
       // sessionStorage 삭제 추적도 클리어
       ['orders','invLogs','dealers','internalTrades','txLogs','bestReturns','kyReturns'].forEach(k => {
         if(typeof _clearDeleted === 'function') _clearDeleted(k);
       });
-      console.log('[임포트] 삭제 기록 클리어 완료. 복원 대상:', idsToRevive.size, '건');
+      console.log('[임포트] 로컬 삭제 기록 클리어 완료. 복원 대상:', idsToRevive.size, '건');
     }
     
     // 실제 적용
@@ -7532,7 +7560,39 @@ async function _executeSelectiveImport(){
 
     saveLS();
     if(window._fb && window._fb.ready){
-      await fbSaveAll();
+      // ★ 강제 복원 모드: fbSaveAll 호출 전에 Firebase 서버의 tombstones에서도 해당 ID들을 직접 삭제
+      //   (그렇지 않으면 fbSaveAll 내부의 _mergeRemoteAll이 서버 tombstones를 다시 흡수하여 부활시킴)
+      if(clearTombstones && _idsToReviveByKind){
+        try{
+          const fb = window._fb;
+          let removeCount = 0;
+          const removePromises = [];
+          Object.keys(_idsToReviveByKind).forEach(kind => {
+            _idsToReviveByKind[kind].forEach(id => {
+              // 코드베이스 일관성: fb.set(ref, null) 패턴 사용 (line 6245, 6672 참조)
+              removePromises.push(fb.set(fb.ref(fb.db, 'amt_data/tombstones/'+kind+'/'+id), null));
+              removeCount++;
+            });
+          });
+          if(removeCount > 0){
+            await Promise.all(removePromises);
+            console.log('[임포트] 서버 tombstones 직접 삭제 완료:', removeCount, '건');
+          }
+        }catch(e){
+          console.warn('[임포트] 서버 tombstones 삭제 실패 (계속 진행):', e);
+        }
+        // fbSaveAll 동안 _mergeRemoteAll이 부활시킨 ID를 다시 tombstone화하지 않도록 보호
+        window._suppressRevivedTombstones = _idsToReviveByKind;
+      }
+      try{
+        await fbSaveAll();
+      } finally {
+        // 보호 플래그 해제 — _pendingRemoteSnap의 setTimeout(_applyRemoteSnap, 0)이 끝난 뒤 해제되도록 약간 지연
+        // (즉시 해제하면 직후의 _applyRemoteSnap이 서버 tombstones를 다시 흡수해서 부활 ID를 또 막아버림)
+        if(clearTombstones){
+          setTimeout(() => { window._suppressRevivedTombstones = null; }, 1500);
+        }
+      }
     }
 
     addAuditLog('edit','데이터',`JSON 가져오기: ${selectedList.join(', ')}${convertAdjust?' (adjust→delta 변환)':''}${clearTombstones?' (강제 복원 모드)':''}`);
