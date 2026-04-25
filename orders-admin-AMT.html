@@ -11619,7 +11619,12 @@ function renderHistory(){
       if(r.source === 'statement'){
         actions.push(`<button class="btn btn-outline btn-sm" style="font-size:.7rem;padding:4px 8px" onclick="openResendModal('${r.id}')">📧 재발송</button>`);
       } else {
-        actions.push('<span style="font-size:.7rem;color:#888">바로빌 측 재발송</span>');
+        // 세금계산서: 바로빌에서 보기/수정 버튼
+        if(r.mgtNum){
+          actions.push(`<button class="btn btn-outline btn-sm" style="font-size:.7rem;padding:4px 8px;border-color:#9333ea;color:#9333ea" onclick="openBarobillSite('${escapeHtml(r.mgtNum)}','${escapeHtml(r.invoiceNum||'')}')" title="바로빌에서 수정/취소/조회">🔗 바로빌</button>`);
+        } else {
+          actions.push('<span style="font-size:.7rem;color:#888">바로빌 측 재발송</span>');
+        }
       }
 
       return `<tr style="border-bottom:1px solid var(--border)">
@@ -11736,6 +11741,50 @@ function exportHistoryCsv(){
   a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
   if(typeof toast === 'function') toast('📤 CSV 내보내기 완료 ('+filtered.length+'건)','success');
+}
+
+// 바로빌 사이트 열기 + MgtNum 클립보드 복사
+// 사용자가 바로빌 로그인 후 매출 목록조회에서 관리번호 검색하면 됨
+function openBarobillSite(mgtNum, invoiceNum){
+  if(!mgtNum){
+    if(typeof toast === 'function') toast('관리번호가 없습니다','error');
+    return;
+  }
+  const BAROBILL_URL = 'https://www.barobill.co.kr/login/login.asp';
+
+  // 클립보드에 MgtNum 복사 시도 (권한 거부되어도 동작은 계속)
+  const copyText = mgtNum;
+  let copied = false;
+  try {
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(copyText).then(()=>{}).catch(()=>{});
+      copied = true;
+    } else {
+      // 폴백: textarea + execCommand
+      const ta = document.createElement('textarea');
+      ta.value = copyText;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); copied = true; } catch(e) {}
+      document.body.removeChild(ta);
+    }
+  } catch(e) { /* 무시 */ }
+
+  // 안내 메시지 + 바로빌 사이트 열기
+  const msg = `🔗 바로빌 사이트로 이동합니다\n\n`
+    + `📋 관리번호 (MgtNum)\n   ${mgtNum}\n`
+    + (invoiceNum ? `\n📌 국세청 승인번호\n   ${invoiceNum}\n` : '')
+    + `\n${copied ? '✅ 관리번호가 클립보드에 복사되었습니다.' : '※ 관리번호를 메모하세요.'}\n\n`
+    + `■ 사용 방법\n`
+    + `1. 바로빌 로그인\n`
+    + `2. [세금계산서] → [매출 목록조회]\n`
+    + `3. 검색조건 "관리번호"에 붙여넣기 (Ctrl+V)\n`
+    + `4. 해당 건에서 [수정발급] / [발행취소] 선택`;
+
+  alert(msg);
+  window.open(BAROBILL_URL, '_blank', 'noopener,noreferrer');
 }
 
 // 재발송 모달 열기
