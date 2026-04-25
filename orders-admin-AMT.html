@@ -4890,10 +4890,16 @@ async function issueTaxInvoice(){
             mgtNum: mgtNum,        // ★ 추적용 관리번호
             invoiceNum: result.invoiceNum,
             mode: result.mode,
+            // ★ 이력조회 표시용 필드 추가
+            direction: 'AMT_to_KY',
+            dealerName: p.invoicee.name,      // 공급받는자 = KY
+            dealerRegNo: p.invoicee.regNo,
+            dealerEmail: 'amedtech@gmail.com', // KY 파트너 가입 이메일 (바로빌 발송 주소)
             supplyAmount: p.supplyAmount,
             taxAmount: p.taxAmount,
             totalAmount: p.totalAmount,
-            issuedAt: new Date().toISOString()
+            issuedAt: new Date().toISOString(),
+            issuedBy: window._amtAdminName || '─'
           });
         }
       }catch(e){ console.warn('Firebase 저장 실패:', e); }
