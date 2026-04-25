@@ -984,6 +984,55 @@ async function sendStatementEmail(dealerName, dealerEmail, orderId, statementHTM
   return result;
 }
 
+// ── ★ 거래명세서 발송 이력 Firebase 저장 (statements/ 경로) ──
+// type: 'AMT_to_KY' | 'KY_to_dealer'
+// items: [{product, qty, unitPrice, deliveryFee?}], totalAmount: 합계 (택배비 포함)
+async function logStatementSent(payload){
+  try{
+    const fb = window._fb;
+    if(!fb || !fb.ready){
+      console.warn('[statements] Firebase 미준비 - 이력 저장 생략');
+      return;
+    }
+    const logId = 'st_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+    let sentByEmail = '';
+    try{
+      const sess = JSON.parse(sessionStorage.getItem('amt_auth_session')||'null');
+      sentByEmail = (sess && sess.email) || '';
+    }catch(_){}
+    const record = {
+      logId,
+      type: payload.type || 'KY_to_dealer',
+      orderId: payload.orderId || '',
+      dealerName: payload.dealerName || '',
+      dealerRegNo: payload.dealerRegNo || '',
+      recipientEmail: payload.recipientEmail || '',
+      items: payload.items || [],
+      itemsCount: (payload.items || []).length,
+      totalAmount: Number(payload.totalAmount) || 0,
+      includeDeliveryFee: !!payload.includeDeliveryFee,
+      sentAt: new Date().toISOString(),
+      sentBy: window._amtAdminName || '─',
+      sentByEmail
+    };
+    await fb.set(fb.ref(fb.db, 'statements/' + logId), record);
+    console.log('📋 거래명세서 이력 저장:', logId, '(', record.dealerName, '/', record.totalAmount.toLocaleString(), '원 )');
+  }catch(e){
+    // 이력 저장 실패가 발송 자체를 깨뜨리면 안 됨
+    console.warn('[statements] 이력 저장 실패 (발송은 정상):', e);
+  }
+}
+
+// 거래명세서 items 배열에서 합계 계산 (택배비 포함)
+function calcStatementTotal(items){
+  let sum = 0;
+  for(const it of (items||[])){
+    sum += (Number(it.qty)||0) * (Number(it.unitPrice)||0);
+    sum += Number(it.deliveryFee)||0;
+  }
+  return sum;
+}
+
 // ── [경로1] KY주문 출고 시 발송 ─────────────────────────────
 // includeDeliveryFee: 택배비 포함 명세서 발송 여부 (관리자가 출고 시 선택)
 //                     null/undefined면 order.fee>0 기준으로 자동 판단 (기존 동작)
@@ -1018,6 +1067,20 @@ async function sendStatementOnKyShip(order, includeDeliveryFee) {
     const targetEmail = info.statementEmail || info.email;
     await sendStatementEmail(order.dealerName, targetEmail, order.id, html);
     console.log('✅ 거래명세서 발송 완료 →', targetEmail, '(택배비 포함:', includeFee, ')');
+    // ★ 이력 저장 (실패해도 발송 결과에 영향 없음)
+    logStatementSent({
+      type: 'KY_to_dealer',
+      orderId: order.id,
+      dealerName: order.dealerName,
+      dealerRegNo: info.regNo || '',
+      recipientEmail: targetEmail,
+      items: items.map(it => ({
+        product: it.product, catNo: it.catNo, qty: it.qty,
+        unitPrice: it.unitPrice, deliveryFee: it.deliveryFee || 0
+      })),
+      totalAmount: calcStatementTotal(items),
+      includeDeliveryFee: includeFee
+    });
   } catch(e) {
     console.error('거래명세서 발송 실패:', e);
     toast('⚠️ 출고 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -1053,6 +1116,20 @@ async function sendStatementOnAmtOrder(order, dealer, includeDeliveryFee) {
     const targetEmail = info.statementEmail || info.email;
     await sendStatementEmail(dealer.name, targetEmail, order.id, html);
     console.log('✅ 거래명세서 발송 완료 →', targetEmail, '(택배비 포함:', includeFee, ')');
+    // ★ 이력 저장
+    logStatementSent({
+      type: 'KY_to_dealer',
+      orderId: order.id,
+      dealerName: dealer.name,
+      dealerRegNo: info.regNo || '',
+      recipientEmail: targetEmail,
+      items: items.map(it => ({
+        product: it.product, catNo: it.catNo, qty: it.qty,
+        unitPrice: it.unitPrice, deliveryFee: it.deliveryFee || 0
+      })),
+      totalAmount: calcStatementTotal(items),
+      includeDeliveryFee: includeFee
+    });
   } catch(e) {
     console.error('거래명세서 발송 실패:', e);
     toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -1093,6 +1170,20 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
     const targetEmail = info.statementEmail || info.email;
     await sendStatementEmail(dealer.name, targetEmail, groupOrder.id, html);
     console.log('✅ 거래명세서 발송 완료 (다제품 그룹) →', targetEmail, items.length+'개 품목');
+    // ★ 이력 저장
+    logStatementSent({
+      type: 'KY_to_dealer',
+      orderId: groupOrder.id,
+      dealerName: dealer.name,
+      dealerRegNo: info.regNo || '',
+      recipientEmail: targetEmail,
+      items: items.map(it => ({
+        product: it.product, catNo: it.catNo, qty: it.qty,
+        unitPrice: it.unitPrice, deliveryFee: it.deliveryFee || 0
+      })),
+      totalAmount: calcStatementTotal(items),
+      includeDeliveryFee: includeFee
+    });
   } catch(e) {
     console.error('거래명세서 발송 실패 (그룹):', e);
     toast('⚠️ 발주 저장 완료, 거래명세서 발송 실패: ' + e.message, 'error');
@@ -1146,6 +1237,7 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
   <button class="nav-btn" data-page="report" onclick="nav(this)">📈 리포트</button>
   <button class="nav-btn" data-page="dashboard" onclick="nav(this)">📊 대시보드</button>
   <button class="nav-btn" data-page="dealers" onclick="nav(this)">🏢 대리점관리</button>
+  <button class="nav-btn" data-page="history" onclick="nav(this)">📋 이력조회</button>
   <button class="nav-btn" data-page="settings" onclick="nav(this)">⚙️ 설정</button>
 </nav>
 
@@ -2120,7 +2212,103 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
   </div>
 </div>
 
+<!-- ═══════════ 발행/발송 이력조회 ═══════════ -->
+<div class="page" id="page-history">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><div class="card-title-dot" style="background:var(--blue)"></div>📋 발행/발송 이력 조회</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="loadHistory()">🔄 새로고침</button>
+        <button class="btn btn-primary btn-sm" onclick="exportHistoryCsv()">📤 엑셀 내보내기 (CSV)</button>
+      </div>
+    </div>
+
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem;color:#1e40af">
+      📧 <b>거래명세서</b> 발송 기록(<code>statements/</code>)과 <b>세금계산서</b> 발행 기록(<code>tax_invoices/</code>)을 함께 조회합니다.
+      재발송은 거래명세서만 지원합니다 (세금계산서는 바로빌 측 재발송 사용).
+    </div>
+
+    <!-- 필터 -->
+    <div class="form-grid" style="margin-bottom:12px">
+      <div class="form-group">
+        <label>시작일</label>
+        <input type="date" id="histDateFrom" onchange="renderHistory()">
+      </div>
+      <div class="form-group">
+        <label>종료일</label>
+        <input type="date" id="histDateTo" onchange="renderHistory()">
+      </div>
+      <div class="form-group" style="flex:1.2">
+        <label>대리점</label>
+        <select id="histDealer" onchange="renderHistory()">
+          <option value="">-- 전체 --</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>유형</label>
+        <select id="histType" onchange="renderHistory()">
+          <option value="all">전체</option>
+          <option value="statement">📧 거래명세서</option>
+          <option value="tax">🧾 세금계산서</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;display:flex;align-items:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="resetHistoryFilters()" style="margin-bottom:2px">↺ 필터 초기화</button>
+      </div>
+    </div>
+
+    <!-- 요약 -->
+    <div id="histSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:.78rem"></div>
+
+    <!-- 테이블 -->
+    <div style="overflow-x:auto">
+      <table id="histTable" style="width:100%;border-collapse:collapse;font-size:.82rem;min-width:880px">
+        <thead>
+          <tr style="background:#f8f9fc;border-bottom:2px solid var(--border);text-align:left">
+            <th style="padding:8px 10px;width:140px">발송/발행일시</th>
+            <th style="padding:8px 10px;width:90px">유형</th>
+            <th style="padding:8px 10px">대리점</th>
+            <th style="padding:8px 10px;width:110px">주문ID</th>
+            <th style="padding:8px 10px">수신 이메일</th>
+            <th style="padding:8px 10px;width:110px;text-align:right">금액</th>
+            <th style="padding:8px 10px;width:80px">상태</th>
+            <th style="padding:8px 10px;width:90px">처리자</th>
+            <th style="padding:8px 10px;width:140px">동작</th>
+          </tr>
+        </thead>
+        <tbody id="histTbody">
+          <tr><td colspan="9" style="text-align:center;padding:30px;color:#888">조회하려면 위에서 "🔄 새로고침"을 클릭하세요.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 </div><!-- /main -->
+
+<!-- ═══ MODAL: 거래명세서 재발송 ═══ -->
+<div class="modal-bg" id="histResendModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">
+      <span>📧 거래명세서 재발송</span>
+      <button class="close-btn" onclick="closeHistResendModal()">✕</button>
+    </div>
+    <div id="histResendBody" style="padding:0 4px 8px;font-size:.85rem">
+      <!-- 동적 채움 -->
+    </div>
+    <div class="form-group">
+      <label>수신 이메일 <span class="req">*</span></label>
+      <input type="email" id="histResendEmail" placeholder="example@domain.com">
+      <p style="font-size:.72rem;color:#888;margin-top:4px">기본값은 원래 수신자 이메일입니다. 다른 주소로 재발송하려면 수정하세요.</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-ghost btn-sm" onclick="closeHistResendModal()">취소</button>
+      <button class="btn btn-primary btn-sm" id="histResendBtn" onclick="confirmResendStatement()">재발송</button>
+    </div>
+    <div id="histResendStatus" style="margin-top:10px;font-size:.78rem"></div>
+  </div>
+</div>
+
 
 <!-- ═══ MODAL: 대리점 추가/편집 ═══ -->
 <div class="modal-bg" id="dealerModal">
@@ -7409,6 +7597,12 @@ function nav(btn){
       try { loadDealerCodes(); } catch(e) { console.warn('대리점 목록 로드 실패:', e); }
     }
   }
+  // ★ 이력조회 탭 진입 시 자동 로드
+  if(page==='history'){
+    if(typeof initHistoryPage === 'function'){
+      try { initHistoryPage(); } catch(e) { console.warn('이력조회 초기화 실패:', e); }
+    }
+  }
 }
 
 function recTab(name,btn){
@@ -10904,6 +11098,495 @@ function buildTaxDataFromAmtOrderGroup(groupOrder, dealer, includeDeliveryFee) {
     dealerEmail: info?.taxEmail || info?.email || dealer.taxEmail || dealer.email || '',
     issueDate, items, total, supplyAmt, taxAmt
   };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   📋 발행/발송 이력조회 모듈
+   - statements/ (거래명세서 발송 이력)
+   - tax_invoices/ (세금계산서 발행 이력)
+   - 필터: 날짜 / 대리점 / 유형
+   - 기능: 새로고침 / 재발송 / CSV 내보내기
+═══════════════════════════════════════════════════════════════ */
+
+// 모듈 상태 (전역 충돌 방지를 위해 _hist 네임스페이스)
+window._hist = window._hist || {
+  rows: [],          // 정규화된 모든 이력 (statements + tax_invoices 통합)
+  loaded: false,
+  resendTarget: null // 재발송 모달용 임시 보관
+};
+
+// 페이지 진입 시 1회 초기화 (대리점 셀렉트, 기본 날짜 등)
+async function initHistoryPage(){
+  // 대리점 셀렉트 채우기 (window.dealers 또는 amt_data/dealers 우선)
+  try{
+    const sel = document.getElementById('histDealer');
+    if(sel && sel.options.length <= 1){
+      let dealersList = window.dealers || [];
+      if((!dealersList || !dealersList.length) && window._fb && window._fb.ready){
+        try{
+          const snap = await window._fb.get(window._fb.ref(window._fb.db, 'amt_data/dealers'));
+          if(snap.exists()) dealersList = snap.val() || [];
+        }catch(_){}
+      }
+      const names = Array.from(new Set((dealersList||[]).map(d => d && d.name).filter(Boolean))).sort();
+      // KY (내부거래용)도 옵션에 포함
+      if(!names.includes('(주)케이와이메디칼')) names.unshift('(주)케이와이메디칼');
+      for(const n of names){
+        const opt = document.createElement('option');
+        opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      }
+    }
+  }catch(e){ console.warn('[history] 대리점 셀렉트 초기화 실패:', e); }
+
+  // 기본 날짜 범위: 최근 3개월
+  try{
+    const fromEl = document.getElementById('histDateFrom');
+    const toEl = document.getElementById('histDateTo');
+    if(fromEl && !fromEl.value){
+      const d = new Date(); d.setMonth(d.getMonth() - 3);
+      fromEl.value = d.toISOString().slice(0,10);
+    }
+    if(toEl && !toEl.value){
+      toEl.value = new Date().toISOString().slice(0,10);
+    }
+  }catch(_){}
+
+  // 첫 진입 시 자동 로드
+  if(!window._hist.loaded){
+    await loadHistory();
+  } else {
+    renderHistory();
+  }
+}
+
+// Firebase에서 이력 로드 (statements + tax_invoices 병렬)
+async function loadHistory(){
+  const tbody = document.getElementById('histTbody');
+  if(tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#888">⏳ 로딩 중...</td></tr>';
+
+  const fb = window._fb;
+  if(!fb || !fb.ready){
+    if(tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#c00">⚠️ Firebase 연결 안 됨</td></tr>';
+    return;
+  }
+
+  try{
+    const [stSnap, txSnap] = await Promise.all([
+      fb.get(fb.ref(fb.db, 'statements')).catch(e => { console.warn('[history] statements 조회 실패:', e); return null; }),
+      fb.get(fb.ref(fb.db, 'tax_invoices')).catch(e => { console.warn('[history] tax_invoices 조회 실패:', e); return null; })
+    ]);
+
+    const rows = [];
+
+    // statements 정규화
+    if(stSnap && stSnap.exists()){
+      const data = stSnap.val() || {};
+      for(const [key, v] of Object.entries(data)){
+        if(!v || typeof v !== 'object') continue;
+        rows.push({
+          id: key,
+          source: 'statement',
+          kind: '📧 명세서',
+          subType: v.type || 'KY_to_dealer',
+          dateIso: v.sentAt || '',
+          dealerName: v.dealerName || '',
+          dealerRegNo: v.dealerRegNo || '',
+          orderId: v.orderId || '',
+          email: v.recipientEmail || '',
+          amount: Number(v.totalAmount) || 0,
+          status: 'sent',
+          actor: v.sentBy || v.sentByEmail || '─',
+          items: Array.isArray(v.items) ? v.items : [],
+          includeDeliveryFee: !!v.includeDeliveryFee,
+          raw: v
+        });
+      }
+    }
+
+    // tax_invoices 정규화
+    if(txSnap && txSnap.exists()){
+      const data = txSnap.val() || {};
+      for(const [key, v] of Object.entries(data)){
+        if(!v || typeof v !== 'object') continue;
+        const isInternal = v.direction === 'AMT_to_KY' || (!!v.tradeId && !v.direction);
+        const dealerName = v.dealerName || (isInternal ? '(주)케이와이메디칼' : '');
+        const total = Number(v.totalAmount)
+                   || ((Number(v.supplyAmount)||0) + (Number(v.taxAmount)||0))
+                   || 0;
+        rows.push({
+          id: key,
+          source: 'tax',
+          kind: '🧾 세금계산서',
+          subType: v.direction || (isInternal ? 'AMT_to_KY' : 'KY_to_dealer'),
+          dateIso: v.issuedAt || '',
+          dealerName,
+          dealerRegNo: v.dealerRegNo || '',
+          orderId: v.tradeId || v.orderId || '',
+          email: v.dealerEmail || '',
+          amount: total,
+          status: v.mode === 'prod' ? 'prod' : 'test',
+          actor: v.issuedBy || '─',
+          invoiceNum: v.invoiceNum || '',
+          raw: v
+        });
+      }
+    }
+
+    // 최신순 정렬
+    rows.sort((a,b) => (b.dateIso||'').localeCompare(a.dateIso||''));
+
+    window._hist.rows = rows;
+    window._hist.loaded = true;
+    console.log('📋 이력 로드 완료: 명세서', rows.filter(r=>r.source==='statement').length, '건 / 세금계산서', rows.filter(r=>r.source==='tax').length, '건');
+    renderHistory();
+  }catch(e){
+    console.error('[history] 로드 실패:', e);
+    if(tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#c00">⚠️ 로드 실패: '+(e.message||e)+'</td></tr>';
+  }
+}
+
+// 필터 적용 + 테이블 렌더
+function renderHistory(){
+  const tbody = document.getElementById('histTbody');
+  const summary = document.getElementById('histSummary');
+  if(!tbody) return;
+
+  const rows = window._hist.rows || [];
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#888">기록이 없습니다.</td></tr>';
+    if(summary) summary.innerHTML = '';
+    return;
+  }
+
+  const dateFrom = (document.getElementById('histDateFrom')||{}).value || '';
+  const dateTo   = (document.getElementById('histDateTo')||{}).value || '';
+  const dealer   = (document.getElementById('histDealer')||{}).value || '';
+  const type     = (document.getElementById('histType')||{}).value || 'all';
+
+  // 종료일은 그날 23:59:59까지 포함
+  const fromTs = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : -Infinity;
+  const toTs   = dateTo   ? new Date(dateTo   + 'T23:59:59').getTime() :  Infinity;
+
+  const filtered = rows.filter(r => {
+    if(type === 'statement' && r.source !== 'statement') return false;
+    if(type === 'tax' && r.source !== 'tax') return false;
+    if(dealer && r.dealerName !== dealer) return false;
+    if(r.dateIso){
+      const t = new Date(r.dateIso).getTime();
+      if(isNaN(t)) return true;
+      if(t < fromTs || t > toTs) return false;
+    }
+    return true;
+  });
+
+  if(!filtered.length){
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#888">조건에 맞는 기록이 없습니다.</td></tr>';
+  } else {
+    tbody.innerHTML = filtered.map(r => {
+      const dt = r.dateIso ? formatHistDate(r.dateIso) : '─';
+      const kindBadge = r.source === 'statement'
+        ? '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600">📧 명세서</span>'
+        : '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600">🧾 세금계산서</span>';
+      const subTypeLabel = r.subType === 'AMT_to_KY' ? '<span style="font-size:.7rem;color:#666">AMT→KY</span>'
+                         : r.subType === 'KY_to_dealer' ? '<span style="font-size:.7rem;color:#666">KY→대리점</span>'
+                         : '';
+      const statusBadge = r.source === 'tax'
+        ? (r.status === 'prod'
+            ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:600">🔴 운영</span>'
+            : '<span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:600">🟡 테스트</span>')
+        : '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:600">✅ 발송</span>';
+      const orderIdShort = r.orderId ? (r.orderId.length > 14 ? r.orderId.slice(0,12)+'…' : r.orderId) : '─';
+      const orderIdCell  = r.invoiceNum
+        ? `<span title="${escapeHtml(r.orderId)}">${escapeHtml(orderIdShort)}</span><br><span style="font-size:.7rem;color:#0369a1">No.${escapeHtml(r.invoiceNum)}</span>`
+        : `<span title="${escapeHtml(r.orderId)}">${escapeHtml(orderIdShort)}</span>`;
+
+      const actions = [];
+      if(r.source === 'statement'){
+        actions.push(`<button class="btn btn-outline btn-sm" style="font-size:.7rem;padding:4px 8px" onclick="openResendModal('${r.id}')">📧 재발송</button>`);
+      } else {
+        actions.push('<span style="font-size:.7rem;color:#888">바로빌 측 재발송</span>');
+      }
+
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;font-size:.78rem">${dt}</td>
+        <td style="padding:8px 10px">${kindBadge}<br>${subTypeLabel}</td>
+        <td style="padding:8px 10px;font-weight:600">${escapeHtml(r.dealerName||'─')}</td>
+        <td style="padding:8px 10px;font-size:.78rem;font-family:monospace">${orderIdCell}</td>
+        <td style="padding:8px 10px;font-size:.78rem">${escapeHtml(r.email||'─')}</td>
+        <td style="padding:8px 10px;text-align:right;font-weight:600">${(r.amount||0).toLocaleString()}원</td>
+        <td style="padding:8px 10px">${statusBadge}</td>
+        <td style="padding:8px 10px;font-size:.78rem">${escapeHtml(r.actor||'─')}</td>
+        <td style="padding:8px 10px">${actions.join(' ')}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // 요약
+  if(summary){
+    const stCount = filtered.filter(r => r.source === 'statement').length;
+    const txCount = filtered.filter(r => r.source === 'tax').length;
+    const stSum = filtered.filter(r => r.source === 'statement').reduce((s,r)=>s+(r.amount||0), 0);
+    const txSum = filtered.filter(r => r.source === 'tax').reduce((s,r)=>s+(r.amount||0), 0);
+    summary.innerHTML = [
+      `<span style="background:#dbeafe;color:#1e40af;padding:6px 12px;border-radius:12px"><b>📧 명세서:</b> ${stCount}건 / ${stSum.toLocaleString()}원</span>`,
+      `<span style="background:#fef3c7;color:#92400e;padding:6px 12px;border-radius:12px"><b>🧾 세금계산서:</b> ${txCount}건 / ${txSum.toLocaleString()}원</span>`,
+      `<span style="background:#f3f4f6;color:#374151;padding:6px 12px;border-radius:12px"><b>총:</b> ${filtered.length}건</span>`
+    ].join('');
+  }
+}
+
+function resetHistoryFilters(){
+  const fromEl = document.getElementById('histDateFrom');
+  const toEl = document.getElementById('histDateTo');
+  const dealerEl = document.getElementById('histDealer');
+  const typeEl = document.getElementById('histType');
+  if(fromEl){
+    const d = new Date(); d.setMonth(d.getMonth() - 3);
+    fromEl.value = d.toISOString().slice(0,10);
+  }
+  if(toEl) toEl.value = new Date().toISOString().slice(0,10);
+  if(dealerEl) dealerEl.value = '';
+  if(typeEl) typeEl.value = 'all';
+  renderHistory();
+}
+
+// 한글 BOM 포함 CSV 다운로드 (엑셀 호환)
+function exportHistoryCsv(){
+  const rows = window._hist.rows || [];
+  if(!rows.length){
+    if(typeof toast === 'function') toast('내보낼 데이터가 없습니다','error');
+    return;
+  }
+
+  // 화면에 보이는 필터 그대로 적용
+  const dateFrom = (document.getElementById('histDateFrom')||{}).value || '';
+  const dateTo   = (document.getElementById('histDateTo')||{}).value || '';
+  const dealer   = (document.getElementById('histDealer')||{}).value || '';
+  const type     = (document.getElementById('histType')||{}).value || 'all';
+  const fromTs = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : -Infinity;
+  const toTs   = dateTo   ? new Date(dateTo   + 'T23:59:59').getTime() :  Infinity;
+
+  const filtered = rows.filter(r => {
+    if(type === 'statement' && r.source !== 'statement') return false;
+    if(type === 'tax' && r.source !== 'tax') return false;
+    if(dealer && r.dealerName !== dealer) return false;
+    if(r.dateIso){
+      const t = new Date(r.dateIso).getTime();
+      if(!isNaN(t) && (t < fromTs || t > toTs)) return false;
+    }
+    return true;
+  });
+
+  if(!filtered.length){
+    if(typeof toast === 'function') toast('필터 조건에 맞는 데이터가 없습니다','error');
+    return;
+  }
+
+  const header = ['일시','유형','구분','대리점','사업자번호','주문ID','세금계산서번호','수신이메일','금액','상태','처리자'];
+  const csvRows = [header];
+  for(const r of filtered){
+    csvRows.push([
+      r.dateIso ? formatHistDate(r.dateIso) : '',
+      r.source === 'statement' ? '거래명세서' : '세금계산서',
+      r.subType === 'AMT_to_KY' ? 'AMT→KY' : (r.subType === 'KY_to_dealer' ? 'KY→대리점' : ''),
+      r.dealerName || '',
+      r.dealerRegNo || '',
+      r.orderId || '',
+      r.invoiceNum || '',
+      r.email || '',
+      r.amount || 0,
+      r.source === 'tax' ? (r.status === 'prod' ? '운영' : '테스트') : '발송',
+      r.actor || ''
+    ]);
+  }
+
+  const csv = csvRows.map(row =>
+    row.map(cell => {
+      const s = String(cell == null ? '' : cell);
+      // CSV 이스케이프: 쉼표/따옴표/줄바꿈 포함 시 큰따옴표로 감싸기
+      if(/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }).join(',')
+  ).join('\r\n');
+
+  // 한글 깨짐 방지를 위한 BOM
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  a.href = url;
+  a.download = `history_${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  if(typeof toast === 'function') toast('📤 CSV 내보내기 완료 ('+filtered.length+'건)','success');
+}
+
+// 재발송 모달 열기
+function openResendModal(logId){
+  const row = (window._hist.rows||[]).find(r => r.id === logId && r.source === 'statement');
+  if(!row){
+    if(typeof toast === 'function') toast('이력을 찾을 수 없습니다','error');
+    return;
+  }
+  window._hist.resendTarget = row;
+
+  const body = document.getElementById('histResendBody');
+  if(body){
+    const itemsHtml = (row.items||[]).map(it =>
+      `<li>${escapeHtml(it.product||'')} ${(Number(it.qty)||0)}개 × ${(Number(it.unitPrice)||0).toLocaleString()}원${it.deliveryFee ? ' (+택배비 '+Number(it.deliveryFee).toLocaleString()+'원)' : ''}</li>`
+    ).join('');
+    body.innerHTML = `
+      <div style="background:#f8f9fc;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+        <div><b>대리점:</b> ${escapeHtml(row.dealerName||'─')}</div>
+        <div><b>주문ID:</b> ${escapeHtml(row.orderId||'─')}</div>
+        <div><b>원래 수신:</b> ${escapeHtml(row.email||'─')}</div>
+        <div><b>금액:</b> ${(row.amount||0).toLocaleString()}원${row.includeDeliveryFee ? ' (택배비 포함)' : ''}</div>
+        <div><b>발송일:</b> ${row.dateIso ? formatHistDate(row.dateIso) : '─'}</div>
+        ${itemsHtml ? '<div style="margin-top:6px"><b>품목:</b><ul style="margin:4px 0 0 18px;padding:0">'+itemsHtml+'</ul></div>' : ''}
+      </div>`;
+  }
+
+  const emailEl = document.getElementById('histResendEmail');
+  if(emailEl) emailEl.value = row.email || '';
+  const statusEl = document.getElementById('histResendStatus');
+  if(statusEl){ statusEl.textContent = ''; statusEl.style.background = ''; statusEl.style.color = ''; }
+  const btn = document.getElementById('histResendBtn');
+  if(btn){ btn.disabled = false; btn.textContent = '재발송'; }
+
+  const modal = document.getElementById('histResendModal');
+  if(modal) modal.classList.add('active');
+}
+
+function closeHistResendModal(){
+  const modal = document.getElementById('histResendModal');
+  if(modal) modal.classList.remove('active');
+  window._hist.resendTarget = null;
+}
+
+// 실제 재발송 실행
+async function confirmResendStatement(){
+  const row = window._hist.resendTarget;
+  const emailEl = document.getElementById('histResendEmail');
+  const btn = document.getElementById('histResendBtn');
+  const statusEl = document.getElementById('histResendStatus');
+
+  if(!row){
+    if(statusEl){ statusEl.textContent = '⚠️ 대상 이력이 없습니다'; statusEl.style.color = '#991b1b'; }
+    return;
+  }
+  const targetEmail = (emailEl && emailEl.value || '').trim();
+  if(!targetEmail || !/^\S+@\S+\.\S+$/.test(targetEmail)){
+    if(statusEl){ statusEl.textContent = '⚠️ 올바른 이메일 주소를 입력하세요'; statusEl.style.color = '#991b1b'; }
+    return;
+  }
+
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 발송 중...'; }
+  if(statusEl){ statusEl.textContent = '발송 중...'; statusEl.style.color = '#666'; }
+
+  try{
+    // 대리점 정보 재조회 (이력에서 dealerId가 없을 수 있어 이름으로 매칭)
+    let info = null;
+    try{
+      const dealersList = window.dealers || [];
+      const matched = dealersList.find(d => d && d.name === row.dealerName);
+      if(matched && typeof getDealerInfo === 'function'){
+        info = getDealerInfo(matched, matched.name, { includeDeliveryFee: !!row.includeDeliveryFee });
+      } else if(typeof getDealerInfo === 'function'){
+        info = getDealerInfo(row.dealerName, row.dealerName, { includeDeliveryFee: !!row.includeDeliveryFee });
+      }
+    }catch(_){}
+
+    if(!info){
+      // 대리점 정보를 못 찾으면 이력에서 직접 재구성 (최소 정보)
+      info = {
+        regNo: row.dealerRegNo || '',
+        ceo: '', address: '', tel: '', email: targetEmail,
+        statementEmail: targetEmail,
+        products: {},
+        _fee: 0
+      };
+    }
+
+    // items 재구성: 이력에 저장된 items 사용
+    const items = (row.items||[]).map((it, idx) => ({
+      product: it.product,
+      catNo: it.catNo || '',
+      qty: Number(it.qty) || 0,
+      unitPrice: Number(it.unitPrice) || 0,
+      delivery: !!it.deliveryFee && idx === 0,
+      deliveryFee: idx === 0 ? (Number(it.deliveryFee)||0) : 0
+    }));
+
+    if(!items.length){
+      throw new Error('품목 정보가 없어 명세서를 재구성할 수 없습니다');
+    }
+
+    const html = buildStatementHTML(items, row.dealerName, info, row.orderId || '');
+    await sendStatementEmail(row.dealerName, targetEmail, row.orderId || '', html);
+
+    // 재발송도 이력으로 남김
+    logStatementSent({
+      type: row.subType || 'KY_to_dealer',
+      orderId: row.orderId || '',
+      dealerName: row.dealerName,
+      dealerRegNo: info.regNo || row.dealerRegNo || '',
+      recipientEmail: targetEmail,
+      items: items.map(it => ({
+        product: it.product, catNo: it.catNo, qty: it.qty,
+        unitPrice: it.unitPrice, deliveryFee: it.deliveryFee || 0
+      })),
+      totalAmount: calcStatementTotal(items),
+      includeDeliveryFee: !!row.includeDeliveryFee
+    });
+
+    if(typeof addAuditLog === 'function'){
+      try{ addAuditLog('resend','거래명세서',`${row.dealerName} → ${targetEmail} 재발송 (주문 ${row.orderId||'─'}, ${(row.amount||0).toLocaleString()}원)`); }catch(_){}
+    }
+
+    if(statusEl){
+      statusEl.innerHTML = '✅ 재발송 완료 → <b>'+escapeHtml(targetEmail)+'</b>';
+      statusEl.style.background = '#dcfce7'; statusEl.style.color = '#166534';
+      statusEl.style.padding = '8px 10px'; statusEl.style.borderRadius = '6px';
+    }
+    if(typeof toast === 'function') toast('✅ 거래명세서 재발송 완료','success');
+
+    // 1.5초 후 닫기 + 목록 갱신
+    setTimeout(() => {
+      closeHistResendModal();
+      loadHistory();
+    }, 1500);
+  }catch(e){
+    console.error('[history] 재발송 실패:', e);
+    if(statusEl){
+      statusEl.innerHTML = '❌ 발송 실패: ' + escapeHtml(e.message || String(e));
+      statusEl.style.background = '#fef2f2'; statusEl.style.color = '#991b1b';
+      statusEl.style.padding = '8px 10px'; statusEl.style.borderRadius = '6px';
+    }
+    if(btn){ btn.disabled = false; btn.textContent = '🔄 다시 시도'; }
+  }
+}
+
+// ── 유틸 ──────────────────────────────────────────────────
+function formatHistDate(iso){
+  try{
+    const d = new Date(iso);
+    if(isNaN(d.getTime())) return iso;
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mi = String(d.getMinutes()).padStart(2,'0');
+    return `${yy}-${mm}-${dd} ${hh}:${mi}`;
+  }catch(_){ return iso; }
+}
+
+function escapeHtml(s){
+  if(s == null) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 </script>
