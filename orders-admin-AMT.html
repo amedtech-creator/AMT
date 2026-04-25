@@ -7239,6 +7239,53 @@ function fbStartListener(){
     }
     _applyRemoteSnap(snap.val());
   });
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ 실시간 동기화 안전망 (폴링 + 탭 활성화 감지)
+  //   - WebSocket 끊김, 탭 백그라운드 throttle, 첫 콜백 무시 등의
+  //     상황에서 놓친 업데이트를 따라잡기 위한 보조 메커니즘
+  // ═══════════════════════════════════════════════════════════════
+  if(!window._fbSafetyNetStarted){
+    window._fbSafetyNetStarted = true;
+
+    // 안전망 동기화 함수: _updatedAt만 가볍게 비교 후 필요시 전체 fetch
+    const _safetySyncFn = async (reason) => {
+      if(_saveInProgress) return; // 저장 중이면 스킵
+      const fb2 = window._fb;
+      if(!fb2 || !fb2.ready) return;
+      try {
+        // 1) 가벼운 메타데이터만 먼저 확인 (전체 payload 대신 _updatedAt만)
+        const metaSnap = await fb2.get(fb2.ref(fb2.db, 'amt_data/_updatedAt'));
+        const remoteTime = metaSnap.val() || '';
+        const localTime = localStorage.getItem('amt_updatedAt') || '';
+        if(!remoteTime || remoteTime <= localTime) return; // 최신 상태
+
+        // 2) 새 데이터 있으면 전체 fetch
+        const fullSnap = await fb2.get(fb2.ref(fb2.db, 'amt_data'));
+        if(fullSnap.exists()){
+          console.log('[안전망 동기화] ' + reason + ' → 원격이 더 최신 (' + remoteTime + ' > ' + localTime + ')');
+          _applyRemoteSnap(fullSnap.val());
+        }
+      } catch(e) {
+        // 네트워크 일시 오류는 조용히 넘어감 (다음 주기에 재시도)
+      }
+    };
+
+    // (A) 30초마다 폴링 — WebSocket이 끊겼던 경우 자동 따라잡기
+    setInterval(() => _safetySyncFn('주기적 폴링'), 30000);
+
+    // (B) 탭 활성화될 때 즉시 동기화 — 백그라운드 throttle 직후 따라잡기
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState === 'visible'){
+        _safetySyncFn('탭 활성화');
+      }
+    });
+
+    // (C) 네트워크 재연결 시 즉시 동기화 — 모바일 wifi 전환 등
+    window.addEventListener('online', () => {
+      _safetySyncFn('네트워크 재연결');
+    });
+  }
 }
 
 /* ═══════════════════════════════════════════════════════
