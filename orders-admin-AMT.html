@@ -690,11 +690,11 @@ const KY_SUPPLIER = {
 const AMT_SUPPLIER = {
   regNo:"110-81-99978", name:"(주)에이엠티코리아",
   ceo:"염미정", address:"서울시 은평구 통일로87길 18-6",
-  // ★ 세금계산서 발행용 추가 정보 (값은 AMT 정보 들어오면 갱신)
-  tel:"",
-  hp:"",
+  // ★ 세금계산서 발행용 추가 정보
+  tel:"070-8699-8151",
+  hp:"010-4305-4680",
   bizClass:"도매및 소매업",
-  bizType:"의료용기구 소매업"
+  bizType:"수출입업"
 };
 
 // ★ KY 직인 이미지 (base64 임베드 - 외부 파일 의존성 없음)
@@ -2335,7 +2335,7 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
             <th style="padding:8px 10px;width:140px">발송/발행일시</th>
             <th style="padding:8px 10px;width:90px">유형</th>
             <th style="padding:8px 10px">대리점</th>
-            <th style="padding:8px 10px;width:110px">주문ID</th>
+            <th style="padding:8px 10px;width:160px">주문ID / 번호</th>
             <th style="padding:8px 10px">수신 이메일</th>
             <th style="padding:8px 10px;width:110px;text-align:right">금액</th>
             <th style="padding:8px 10px;width:80px">상태</th>
@@ -11523,14 +11523,13 @@ function renderHistory(){
             ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:600">🔴 운영</span>'
             : '<span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:600">🟡 테스트</span>')
         : '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:600">✅ 발송</span>';
-      const orderIdShort = r.orderId ? (r.orderId.length > 14 ? r.orderId.slice(0,12)+'…' : r.orderId) : '─';
-      // 발주ID + 세금계산서번호 + MgtNum(있으면) 함께 표시
-      let orderIdCell = `<span title="${escapeHtml(r.orderId)}">${escapeHtml(orderIdShort)}</span>`;
+      // ★ 주문ID / 세금계산서번호 / MgtNum 전체 노출 (줄임 제거)
+      let orderIdCell = `<span style="word-break:break-all">${escapeHtml(r.orderId || '─')}</span>`;
       if(r.invoiceNum){
-        orderIdCell += `<br><span style="font-size:.7rem;color:#0369a1">No.${escapeHtml(r.invoiceNum)}</span>`;
+        orderIdCell += `<br><span style="font-size:.7rem;color:#0369a1;word-break:break-all">No.${escapeHtml(r.invoiceNum)}</span>`;
       }
       if(r.mgtNum){
-        orderIdCell += `<br><span style="font-size:.68rem;color:#9333ea" title="바로빌 관리번호">M.${escapeHtml(r.mgtNum)}</span>`;
+        orderIdCell += `<br><span style="font-size:.68rem;color:#9333ea;word-break:break-all" title="바로빌 관리번호">M.${escapeHtml(r.mgtNum)}</span>`;
       }
 
       const actions = [];
