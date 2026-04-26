@@ -11053,12 +11053,16 @@ function openTaxModal(data) {
   const rows = (data.items||[]).map(item => {
     const itemSupply = Math.round((item.amount||0) / 1.1);
     const itemTax = (item.amount||0) - itemSupply;
+    // ★ 택배비 라인은 수량/단가 빈칸 (홈택스 발행 형식과 일치)
+    const isFee = !!item.isDeliveryFee;
+    const qtyDisplay = isFee ? '' : (item.qty||0).toLocaleString();
+    const unitPriceDisplay = isFee ? '' : (item.unitPrice||0).toLocaleString();
     return `
     <tr>
       <td style="border:1px solid var(--border);padding:8px;text-align:center">${data.issueDate||''}</td>
       <td style="border:1px solid var(--border);padding:8px">${item.product||''}</td>
-      <td style="border:1px solid var(--border);padding:8px;text-align:center">${(item.qty||0).toLocaleString()}</td>
-      <td style="border:1px solid var(--border);padding:8px;text-align:right">${(item.unitPrice||0).toLocaleString()}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:center">${qtyDisplay}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:right">${unitPriceDisplay}</td>
       <td style="border:1px solid var(--border);padding:8px;text-align:right">${itemSupply.toLocaleString()}</td>
       <td style="border:1px solid var(--border);padding:8px;text-align:right">${itemTax.toLocaleString()}</td>
     </tr>`;
@@ -11276,8 +11280,26 @@ async function issueBarobillFromTaxModal() {
     + String(today.getMonth()+1).padStart(2,'0')
     + String(today.getDate()).padStart(2,'0');
 
-  // 품목별 Tax 계산 (금액 × 10% 단순 계산)
+  // 품목별 LineItem 매핑
+  // - 일반 품목: 기존 로직 유지 (Amount=amount, Tax=amount*0.1) — OLD와 100% 동일하게 동작
+  // - 택배비 라인: 수량/단가 빈칸, Amount=공급가액, Tax=세액 (홈택스 발행 형식과 일치)
   const items = (data.items || []).map(i => {
+    if(i.isDeliveryFee){
+      const amountInclVat = i.amount || 0;
+      const supply = Math.round(amountInclVat / 1.1);
+      const tax = amountInclVat - supply;
+      return {
+        PurchaseExpiry: writeDate,
+        Name: '택배비',
+        Information: '',
+        ChargeableUnit: '',  // 빈칸 (홈택스에서 수량 빈칸으로 표시)
+        UnitPrice: '',       // 빈칸 (홈택스에서 단가 빈칸으로 표시)
+        Amount: String(supply),  // 공급가액 (예: 4500 → 4091)
+        Tax: String(tax),         // 세액 (예: 4500 → 409)
+        Description: ''
+      };
+    }
+    // 일반 품목 — 기존 로직 그대로 (변경 없음)
     const amount = i.amount || 0;
     const tax = Math.round(amount * 0.1);
     return {
@@ -11461,7 +11483,15 @@ function buildTaxDataFromKyOrder(order, includeDeliveryFee) {
     return { product: displayName, qty, unitPrice, amount: qty * unitPrice };
   });
   const deliveryAmt = includeFee ? (info?._fee || 0) : 0;
-  const total = items.reduce((s,i)=>s+i.amount,0) + deliveryAmt;
+  // ★ 택배비를 별도 라인 아이템으로 추가 (홈택스 발행 형식과 일치)
+  if(deliveryAmt > 0){
+    items.push({
+      product: '택배비',
+      qty: 0, unitPrice: 0, amount: deliveryAmt,
+      isDeliveryFee: true  // 모달/바로빌 페이로드에서 분기 처리용 마커
+    });
+  }
+  const total = items.reduce((s,i)=>s+i.amount,0);
   const supplyAmt = Math.round(total / 1.1);
   const taxAmt = total - supplyAmt;
 
@@ -11496,11 +11526,19 @@ function buildTaxDataFromAmtOrder(order, dealer, includeDeliveryFee) {
   const qty = Math.abs(order.qty||0);
   const amount = qty * unitPrice;
   const deliveryAmt = includeFee ? (info?._fee || 0) : 0;
-  const total = amount + deliveryAmt;
-  const supplyAmt = Math.round(total / 1.1);
-  const taxAmt = total - supplyAmt;
   const displayName = PROD_DISPLAY[order.product] || order.product;
   const items = [{ product: displayName, qty, unitPrice, amount }];
+  // ★ 택배비를 별도 라인 아이템으로 추가 (홈택스 발행 형식과 일치)
+  if(deliveryAmt > 0){
+    items.push({
+      product: '택배비',
+      qty: 0, unitPrice: 0, amount: deliveryAmt,
+      isDeliveryFee: true
+    });
+  }
+  const total = items.reduce((s,i)=>s+i.amount,0);
+  const supplyAmt = Math.round(total / 1.1);
+  const taxAmt = total - supplyAmt;
 
   return {
     orderId: order.id || '',
@@ -11543,6 +11581,14 @@ function buildTaxDataFromAmtOrderGroup(groupOrder, dealer, includeDeliveryFee) {
 
   const itemsTotal = items.reduce((s,i) => s + i.amount, 0);
   const deliveryAmt = includeFee ? (info?._fee || 0) : 0;
+  // ★ 택배비를 별도 라인 아이템으로 추가 (홈택스 발행 형식과 일치)
+  if(deliveryAmt > 0){
+    items.push({
+      product: '택배비',
+      qty: 0, unitPrice: 0, amount: deliveryAmt,
+      isDeliveryFee: true
+    });
+  }
   const total = itemsTotal + deliveryAmt;
   const supplyAmt = Math.round(total / 1.1);
   const taxAmt = total - supplyAmt;
