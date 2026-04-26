@@ -739,6 +739,12 @@ function applyFeeHighlight(dealerName){
   if(!group || !label || !text || !hint) return;
 
   const highlight = isFeeHighlightDealer(dealerName);
+  // ★ 3개 대리점(서정메디케어/엔케이바이오/베스트메디아)이면 체크박스 자동 체크
+  const cbx = document.getElementById('oFeeInclude');
+  if(cbx) cbx.checked = highlight;
+  // 합계 재계산 (택배비 포함 여부에 따라 합계가 바뀜)
+  if(typeof oCalcGrandTotal === 'function') try{ oCalcGrandTotal(); }catch(_){}
+
   if(highlight){
     // 빨간색 강조 박스
     group.style.background = '#fef2f2';
@@ -9102,10 +9108,10 @@ function kyOpenAction(orderId, targetStatus){
     const dealerFee = dealerForFee ? (dealerForFee.fee||0) : 0;
     const orderHasFee = (o.fee||0) > 0;
     if(dealerFee > 0 || orderHasFee){
-      // 기본값: 대리점이 주문할 때 fee를 넣었으면 체크, 아니면 체크 안 함
-      const defaultChecked = orderHasFee ? 'checked' : '';
-      // ★ 서정메디케어/엔케이바이오는 빨간색 강조
+      // ★ 서정메디케어/엔케이바이오/베스트메디아는 빨간색 강조 + 무조건 기본 체크
       const isHighlight = isFeeHighlightDealer(o.dealerName);
+      // 기본값: 3개 대리점이면 무조건 체크, 그 외엔 발주 시 fee를 넣었으면 체크
+      const defaultChecked = (isHighlight || orderHasFee) ? 'checked' : '';
       if(isHighlight){
         feeSelectHtml = `
           <div style="background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:14px 16px;margin-bottom:10px;box-shadow:0 0 0 3px rgba(220,38,38,0.1)">
