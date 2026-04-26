@@ -730,8 +730,10 @@ function isFeeHighlightDealer(dealerName){
   return FEE_HIGHLIGHT_DEALERS.some(d => n === d || n.includes(d));
 }
 
-// 발주입력 화면의 택배비 체크박스를 강조/해제 (대리점 변경 시 호출)
-function applyFeeHighlight(dealerName){
+// 발주입력 화면의 택배비 체크박스를 강조/해제
+// autoCheck: true이면 3개 대리점일 때 체크박스 자동 체크 (대리점 변경 시에만)
+// autoCheck: false이면 강조 스타일만 적용 (refreshAll 등 화면 재렌더링 시 - 체크 상태 보존)
+function applyFeeHighlight(dealerName, autoCheck){
   const group = document.getElementById('oFeeIncludeGroup');
   const label = document.getElementById('oFeeIncludeLabel');
   const text = document.getElementById('oFeeIncludeText');
@@ -739,11 +741,14 @@ function applyFeeHighlight(dealerName){
   if(!group || !label || !text || !hint) return;
 
   const highlight = isFeeHighlightDealer(dealerName);
-  // ★ 3개 대리점(서정메디케어/엔케이바이오/베스트메디아)이면 체크박스 자동 체크
-  const cbx = document.getElementById('oFeeInclude');
-  if(cbx) cbx.checked = highlight;
-  // 합계 재계산 (택배비 포함 여부에 따라 합계가 바뀜)
-  if(typeof oCalcGrandTotal === 'function') try{ oCalcGrandTotal(); }catch(_){}
+  // ★ 자동 체크는 명시적으로 autoCheck=true일 때만 (대리점 새로 선택 시점에만)
+  //   refreshAll/_applyRemoteSnap 등에서 화면 재렌더링 시에는 사용자가 해제한 상태를 보존
+  if(autoCheck === true){
+    const cbx = document.getElementById('oFeeInclude');
+    if(cbx) cbx.checked = highlight;
+    // 합계 재계산 (택배비 포함 여부에 따라 합계가 바뀜)
+    if(typeof oCalcGrandTotal === 'function') try{ oCalcGrandTotal(); }catch(_){}
+  }
 
   if(highlight){
     // 빨간색 강조 박스
@@ -3211,8 +3216,8 @@ function populateSelects(){
       document.getElementById('oFeeGroup').style.display=d.fee>0?'block':'none';
       document.getElementById('oFeeIncludeGroup').style.display=d.fee>0?'block':'none';
       document.getElementById('oFee').value=d.fee||0;
-      // ★ 서정메디케어/엔케이바이오 강조
-      applyFeeHighlight(d.name);
+      // ★ 서정메디케어/엔케이바이오 강조 (강조 스타일만, 체크 상태는 보존)
+      applyFeeHighlight(d.name, false);
       // 선택된 제품이 있으면 단가 재계산
       const orderDate=document.getElementById('oDate').value;
       if(orderDate){
@@ -3395,8 +3400,8 @@ function oOnDealer(){
   document.getElementById('oFeeGroup').style.display = d && d.fee>0 ? 'block' : 'none';
   document.getElementById('oFeeIncludeGroup').style.display = d && d.fee>0 ? 'block' : 'none';
   if(d) document.getElementById('oFee').value = d.fee||0;
-  // ★ 서정메디케어/엔케이바이오는 택배비 체크박스 빨간 강조
-  applyFeeHighlight(d ? d.name : '');
+  // ★ 서정메디케어/엔케이바이오는 택배비 체크박스 빨간 강조 + 자동 체크 (대리점 변경 시점)
+  applyFeeHighlight(d ? d.name : '', true);
   // 각 행 단가/합계 재계산
   if(wrap){
     wrap.querySelectorAll('.form-grid').forEach(row => oRowOnProduct(row.id));
