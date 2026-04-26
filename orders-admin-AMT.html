@@ -11053,16 +11053,16 @@ function openTaxModal(data) {
   const rows = (data.items||[]).map(item => {
     const itemSupply = Math.round((item.amount||0) / 1.1);
     const itemTax = (item.amount||0) - itemSupply;
-    // ★ 택배비 라인은 수량/단가 빈칸 (홈택스 발행 형식과 일치)
+    // ★ OLD 홈택스 발행 형식과 일치: 모든 라인 단가 빈칸 (시스템 단가는 VAT 포함이므로 표시 안 함)
+    // 택배비 라인은 수량도 빈칸
     const isFee = !!item.isDeliveryFee;
     const qtyDisplay = isFee ? '' : (item.qty||0).toLocaleString();
-    const unitPriceDisplay = isFee ? '' : (item.unitPrice||0).toLocaleString();
     return `
     <tr>
       <td style="border:1px solid var(--border);padding:8px;text-align:center">${data.issueDate||''}</td>
       <td style="border:1px solid var(--border);padding:8px">${item.product||''}</td>
       <td style="border:1px solid var(--border);padding:8px;text-align:center">${qtyDisplay}</td>
-      <td style="border:1px solid var(--border);padding:8px;text-align:right">${unitPriceDisplay}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:right"></td>
       <td style="border:1px solid var(--border);padding:8px;text-align:right">${itemSupply.toLocaleString()}</td>
       <td style="border:1px solid var(--border);padding:8px;text-align:right">${itemTax.toLocaleString()}</td>
     </tr>`;
@@ -11280,14 +11280,15 @@ async function issueBarobillFromTaxModal() {
     + String(today.getMonth()+1).padStart(2,'0')
     + String(today.getDate()).padStart(2,'0');
 
-  // 품목별 LineItem 매핑
-  // - 일반 품목: 기존 로직 유지 (Amount=amount, Tax=amount*0.1) — OLD와 100% 동일하게 동작
-  // - 택배비 라인: 수량/단가 빈칸, Amount=공급가액, Tax=세액 (홈택스 발행 형식과 일치)
+  // 품목별 LineItem 매핑 — OLD 홈택스 발행 형식과 일치
+  // 모든 라인 공통: 단가 빈칸, Amount=공급가액(VAT 분리), Tax=세액
+  // - 일반 품목: amount(qty*unitPrice)는 VAT 포함값 → supply/tax로 분리
+  // - 택배비 라인: 수량도 빈칸 + amount는 _fee(VAT 포함) → supply/tax로 분리
   const items = (data.items || []).map(i => {
+    const amountInclVat = i.amount || 0;
+    const supply = Math.round(amountInclVat / 1.1);
+    const tax = amountInclVat - supply;
     if(i.isDeliveryFee){
-      const amountInclVat = i.amount || 0;
-      const supply = Math.round(amountInclVat / 1.1);
-      const tax = amountInclVat - supply;
       return {
         PurchaseExpiry: writeDate,
         Name: '택배비',
@@ -11299,17 +11300,15 @@ async function issueBarobillFromTaxModal() {
         Description: ''
       };
     }
-    // 일반 품목 — 기존 로직 그대로 (변경 없음)
-    const amount = i.amount || 0;
-    const tax = Math.round(amount * 0.1);
+    // 일반 품목 — OLD 홈택스 형식: 단가 빈칸 + 공급가액(VAT 분리)
     return {
       PurchaseExpiry: writeDate,
       Name: i.product || '',
       Information: '',
       ChargeableUnit: String(i.qty || 0),
-      UnitPrice: String(i.unitPrice || 0),
-      Amount: String(amount),
-      Tax: String(tax),
+      UnitPrice: '',  // ★ 빈칸 (시스템 단가는 VAT 포함이므로 표시 안 함, 공급가액만 표시)
+      Amount: String(supply),  // 공급가액 (예: 300개×1100=330000 → 300000)
+      Tax: String(tax),         // 세액 (예: 30000)
       Description: ''
     };
   });
