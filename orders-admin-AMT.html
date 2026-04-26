@@ -4820,7 +4820,7 @@ async function issueTaxInvoice(){
     TaxTotal: String(p.taxAmount),
     TotalAmount: String(p.totalAmount),
     Cash: '', ChkBill: '', Note: '', Credit: '',
-    Remark1: `내부거래 (${p.trade.product} ${fmt(p.trade.qty)}개)`,
+    Remark1: '',
     Remark2: '', Remark3: '',
     Kwon: '', Ho: '', SerialNum: p.trade.tradeId || '',
     InvoicerParty: {
@@ -11337,7 +11337,7 @@ async function issueBarobillFromTaxModal() {
     TaxTotal: String(data.taxAmt),
     TotalAmount: String(data.total),
     Cash: '', ChkBill: '', Note: '', Credit: '',
-    Remark1: `KY→${data.dealerName} (${items.length}개 품목)`.slice(0,50),
+    Remark1: '',
     Remark2: '', Remark3: '',
     Kwon: '', Ho: '', SerialNum: data.orderId || '',  // ★ 일련번호에 발주ID도 기록 (추적용)
     // ★ 공급자: KY (인증키 소유자 - partner='KY' 사용)
