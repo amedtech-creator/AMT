@@ -3636,6 +3636,7 @@ async function _doSaveOrder(){
     ]).filter(l => l);
     if(SUPER_ADMIN_CHAT_ID) sendTelegram(SUPER_ADMIN_CHAT_ID, tgLines.join('\n')).catch(()=>{});
     if(ADMIN1_CHAT_ID) sendTelegram(ADMIN1_CHAT_ID, tgLines.join('\n')).catch(()=>{});
+    if(ADMIN2_CHAT_ID) sendTelegram(ADMIN2_CHAT_ID, tgLines.join('\n')).catch(()=>{});
   }catch(e){ console.warn('발주입력 텔레그램 발송 실패:', e); }
 
   // 폼 초기화 (새 발주 준비)
@@ -7964,6 +7965,7 @@ async function _sendOtpEmail(code){
     await sendTelegram(SUPER_ADMIN_CHAT_ID, lines.join('\n'));
   // 일반관리자에게도 발송
   if(ADMIN1_CHAT_ID) await sendTelegram(ADMIN1_CHAT_ID, lines.join('\n')).catch(()=>{});
+  if(ADMIN2_CHAT_ID) await sendTelegram(ADMIN2_CHAT_ID, lines.join('\n')).catch(()=>{});
     return true;
   } catch(e){
     return false;
@@ -8779,6 +8781,7 @@ function kyStartListener(){
               ]).filter(l => l);
               if(SUPER_ADMIN_CHAT_ID) sendTelegram(SUPER_ADMIN_CHAT_ID, tgLines.join('\n')).catch(()=>{});
               if(ADMIN1_CHAT_ID) sendTelegram(ADMIN1_CHAT_ID, tgLines.join('\n')).catch(()=>{});
+              if(ADMIN2_CHAT_ID) sendTelegram(ADMIN2_CHAT_ID, tgLines.join('\n')).catch(()=>{});
             }catch(e){ console.warn('대리점 발주 텔레그램 발송 실패:', e); }
           });
           const badge = document.getElementById('kyNewBadge');
@@ -10458,6 +10461,8 @@ let TELEGRAM_BOT_TOKEN  = '';
 let SUPER_ADMIN_CHAT_ID = '';
 let ADMIN1_BOT_TOKEN    = '';
 let ADMIN1_CHAT_ID      = '';
+let ADMIN2_BOT_TOKEN    = '';
+let ADMIN2_CHAT_ID      = '';
 
 async function loadTelegramConfig(){
   const fb = window._fb;
@@ -10470,6 +10475,8 @@ async function loadTelegramConfig(){
     SUPER_ADMIN_CHAT_ID = cfg.superAdminChatId || '';
     ADMIN1_BOT_TOKEN    = cfg.admin1Token      || '';
     ADMIN1_CHAT_ID      = cfg.admin1ChatId     || '';
+    ADMIN2_BOT_TOKEN    = cfg.admin2Token      || '';
+    ADMIN2_CHAT_ID      = cfg.admin2ChatId     || '';
     console.log('[텔레그램] 설정 로드 완료');
   }catch(e){ console.warn('텔레그램 설정 로드 실패',e); }
 }
@@ -10478,7 +10485,9 @@ async function loadTelegramConfig(){
 async function sendTelegram(chatId, text){
   if(!chatId){ console.warn('[텔레그램] chatId 없음'); return; }
   // chatId에 따라 토큰 선택
-  const token = (chatId === ADMIN1_CHAT_ID && ADMIN1_BOT_TOKEN) ? ADMIN1_BOT_TOKEN : TELEGRAM_BOT_TOKEN;
+  let token = TELEGRAM_BOT_TOKEN;
+  if(chatId === ADMIN1_CHAT_ID && ADMIN1_BOT_TOKEN) token = ADMIN1_BOT_TOKEN;
+  else if(chatId === ADMIN2_CHAT_ID && ADMIN2_BOT_TOKEN) token = ADMIN2_BOT_TOKEN;
   if(!token){ console.warn('[텔레그램] 토큰 없음'); return; }
   try{
     const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
@@ -10541,6 +10550,7 @@ async function sendTelegramOrderStatus(order, targetStatus, note, nowIso){
   await sendTelegram(SUPER_ADMIN_CHAT_ID, lines.join('\n'));
   // ★ 일반관리자에게도 동시 발송
   if(ADMIN1_CHAT_ID) await sendTelegram(ADMIN1_CHAT_ID, lines.join('\n')).catch(()=>{});
+  if(ADMIN2_CHAT_ID) await sendTelegram(ADMIN2_CHAT_ID, lines.join('\n')).catch(()=>{});
 }
 
 function showOtpModal(reqId, actionLabel, debugOtp){
