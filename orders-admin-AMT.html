@@ -4258,20 +4258,42 @@ function renderRecList(){
       <div class="table-wrap"><table>
         <thead><tr><th>대리점</th><th>제품</th><th>발주일</th><th>수량</th><th>금액</th><th>택배비</th><th>합계</th><th>상태</th><th>액션</th></tr></thead>
         <tbody>
-        ${items.map(o=>`<tr>
-          <td style="font-size:.78rem">${o.dealerName}</td>
-          <td>${prodBadge(o.product)}</td>
-          <td class="td-mono">${o.orderDate}</td>
-          <td class="td-mono td-r">${fmt(o.qty)}</td>
-          <td class="td-mono td-r">${fmt(o.total)}</td>
-          <td class="td-mono td-r">${o.fee?fmt(o.fee):'-'}</td>
-          <td class="td-mono td-r" style="font-weight:700">${fmt(o.total+(o.fee||0))}</td>
-          <td>${statusBadge(o)}</td>
-          <td><div style="display:flex;gap:4px">
-            ${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone('${o.id}')">✓ 수금</button>`
-              :`<button class="btn btn-ghost btn-xs" onclick="cancelDone('${o.id}')">취소</button>`}
-          </div></td>
-        </tr>`).join('')}
+        ${(()=>{
+          // ★ 같은 대리점이 2건 이상인 경우, 그 대리점의 마지막 행에 그룹 합계 표시
+          const dealerCount = {}; // 대리점별 건수
+          const dealerSum = {};   // 대리점별 합계 (택배비 포함)
+          items.forEach(o => {
+            const k = o.dealerName || '─';
+            dealerCount[k] = (dealerCount[k]||0) + 1;
+            dealerSum[k] = (dealerSum[k]||0) + o.total + (o.fee||0);
+          });
+          const dealerSeen = {}; // 진행하면서 카운트
+          return items.map(o => {
+            const k = o.dealerName || '─';
+            dealerSeen[k] = (dealerSeen[k]||0) + 1;
+            // 마지막 행이고 같은 대리점이 2건 이상이면 합계 표시
+            const isLastForDealer = dealerSeen[k] === dealerCount[k];
+            const showGroupTotal = isLastForDealer && dealerCount[k] >= 2;
+            const rowTotal = o.total + (o.fee||0);
+            const totalCell = showGroupTotal
+              ? `<span style="font-weight:700">${fmt(rowTotal)}</span> <span style="color:var(--blue);font-weight:700;font-size:.85rem">(총 ${fmt(dealerSum[k])})</span>`
+              : `<span style="font-weight:700">${fmt(rowTotal)}</span>`;
+            return `<tr>
+              <td style="font-size:.78rem">${o.dealerName}</td>
+              <td>${prodBadge(o.product)}</td>
+              <td class="td-mono">${o.orderDate}</td>
+              <td class="td-mono td-r">${fmt(o.qty)}</td>
+              <td class="td-mono td-r">${fmt(o.total)}</td>
+              <td class="td-mono td-r">${o.fee?fmt(o.fee):'-'}</td>
+              <td class="td-mono td-r">${totalCell}</td>
+              <td>${statusBadge(o)}</td>
+              <td><div style="display:flex;gap:4px">
+                ${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone('${o.id}')">✓ 수금</button>`
+                  :`<button class="btn btn-ghost btn-xs" onclick="cancelDone('${o.id}')">취소</button>`}
+              </div></td>
+            </tr>`;
+          }).join('');
+        })()}
         </tbody>
       </table></div>
     </div>`;
