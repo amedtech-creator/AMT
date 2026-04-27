@@ -4693,10 +4693,23 @@ async function saveInternal(){
   invLogs.push(amtLog);
   invLogs.push(kyLog);
 
+  // ★ txLogs에 AMT→KY 거래 기록 (매출세액 계산/채권채무 반영용)
+  const txLog = {
+    id: 'tx_'+(Date.now()+2),
+    date,
+    type: 'AMT_to_KY',
+    amount: total,
+    memo: `${product} ${fmt(qty)}개${memo?' ('+memo+')':''}`,
+    relInternal: id,
+    createdAt: new Date().toISOString()
+  };
+  txLogs.push(txLog);
+
   saveLS();
   await fbSaveDoc('internal',id,trade);
   await fbSaveDoc('inv',amtLog.id,amtLog);
   await fbSaveDoc('inv',kyLog.id,kyLog);
+  await fbSaveDoc('tx',txLog.id,txLog);
 
   addAuditLog('create','내부거래',`AMT→KY ${product} ${fmt(qty)}개 ${fmt(total)}원 (${date})`);
   toast(`내부거래 저장 완료 ✓ AMT→KY ${product} ${fmt(qty)}개`,'success');
@@ -7774,63 +7787,96 @@ function getVatPeriodInfo(){
   return { periodLabel, startYm, endYm, dueDate, diffDays };
 }
 
-// 해당 기간에 orders 중 특정 회사 관련 매출을 집계
-// AMT: orders의 dealer company가 AMT 소속 (dealerId 기준 매핑 or 기본적으로 KY가 대리점에 판매하므로 KY)
-// 실제로는:
-//   AMT 매출 = txLogs에서 AMT_to_BEST, AMT_to_KY 공급 금액
-//   KY  매출 = orders (KY→대리점 발주), txLogs KY_to_BEST
-//   BEST 매출 = txLogs KY_to_BEST, AMT_to_BEST 반대 (BEST는 매입만)
-// VAT 계산: 매출액(VAT포함) → 공급가액 = 매출액/1.1, VAT = 공급가액 * 0.1
-// orders의 price는 VAT포함 단가로 가정
+// 회사별 부가가치세 계산
+// === 거래 흐름 ===
+// KY: 대리점 발주(orders) → KY 매출 / KY→AMT 반품(bestReturns KY_to_AMT) → KY 매출 차감
+//     ※ 대리점 반품은 단가 0원 발주로 처리되어 자동 차감됨
+// AMT: AMT→KY 물품공급(internalTrades) → AMT 매출 / AMT→BEST 반품(bestReturns AMT_to_BEST) → AMT 매출 차감
+//      수입원가 매입세액(총관리자 입력) → 매입세액 차감
+// BEST: 매출 없음 (외부 거래 없음). AMT→BEST + KY→BEST 반품 받음 → 매입세액만 발생 → 항상 환급(음수)
+// VAT 계산: 매출액(VAT포함) → 공급가액 = 매출액/1.1, VAT = 공급가액 * 0.1 (= 매출액/11)
 function calcVatByCompany(startYm, endYm){
   // 기간 필터 함수
   const inPeriod = ds => ds >= startYm && ds <= endYm+'-31';
 
-  // KY 매출: orders (KY가 대리점에 판매) — 반품은 orders에 음수 total로 포함됨 ✓
+  // === KY 매출 ===
+  // (+) orders (반품은 단가 0원이라 자동 0)
   const kyOrders = orders.filter(o => inPeriod(ym(o.orderDate)));
-  const kyRevenue = kyOrders.reduce((s,o)=>s+orderAmount(o),0);
+  let kyRevenue = kyOrders.reduce((s,o)=>s+orderAmount(o),0);
 
-  // AMT 매출: txLogs의 AMT_to_KY + AMT_to_BEST
-  const amtTx = txLogs.filter(t =>
-    inPeriod(ym(t.date)) &&
-    (t.type==='AMT_to_KY' || t.type==='AMT_to_BEST' || t.type==='ky_supply_AMT_KY')
+  // === AMT 매출 ===
+  // (+) internalTrades (AMT → KY 물품공급)
+  const amtIntTrades = (typeof internalTrades !== 'undefined' ? internalTrades : []).filter(t =>
+    inPeriod(ym(t.date))
   );
-  let amtRevenue = amtTx.reduce((s,t)=>s+t.amount,0);
+  let amtRevenue = amtIntTrades.reduce((s,t)=>s+(Number(t.total)||0),0);
 
-  // ★ 반품 처리 (bestReturns에서 기간 내 반품 차감)
-  //   KY→AMT 반품: AMT 매출(내부거래) 차감 (KY가 받은 물건을 AMT에 반납)
-  //   AMT→BEST 반품: AMT 매출(BEST 판매) 차감 (BEST에게 판 물건을 반납받음)
-  //   ※ 반품가는 VAT포함가로 해석해 /11로 VAT 차감 (세무상 수정세금계산서 기준)
-  let amtReturnAmt = 0;
-  (bestReturns||[]).forEach(r => {
+  // === bestReturns 분류 (반품 처리) ===
+  let kyReturnAmt = 0;       // KY → AMT 반품 (KY 매출 차감)
+  let amtReturnAmt = 0;      // AMT → BEST 반품 (AMT 매출 차감, BEST 매입 발생)
+  let bestPurchaseAmt = 0;   // BEST 매입 합계 (AMT_to_BEST + KY_to_BEST)
+  
+  (typeof bestReturns !== 'undefined' ? bestReturns : []).forEach(r => {
     const ft = r.fromType || (r.from==='AMT' ? 'AMT_to_BEST' : r.from==='KY' ? 'KY_to_BEST' : '');
     const d = r.date || r.createdAt || '';
     if(!inPeriod(ym(d))) return;
-    if(ft === 'KY_to_AMT' || ft === 'AMT_to_BEST'){
-      amtReturnAmt += (Number(r.total)||0);
+    const amt = Number(r.total)||0;
+    if(ft === 'KY_to_AMT'){
+      kyReturnAmt += amt;
+      // KY → AMT 반품: KY가 AMT에 반품 (KY 매출 차감)
+      // AMT 입장에선 매입세액 차감인데, AMT 매입세액은 별도 추적 안 하므로 패스
+    } else if(ft === 'AMT_to_BEST'){
+      amtReturnAmt += amt;
+      bestPurchaseAmt += amt;
+    } else if(ft === 'KY_to_BEST'){
+      // 사용자 정책상 KY→BEST 직접 반품은 없음. 만약 있다면 KY 매출 차감 + BEST 매입
+      kyReturnAmt += amt;
+      bestPurchaseAmt += amt;
     }
   });
+  
+  kyRevenue -= kyReturnAmt;
   amtRevenue -= amtReturnAmt;
+  if(kyRevenue < 0) kyRevenue = 0;
   if(amtRevenue < 0) amtRevenue = 0;
 
-  // BEST 매출: BEST가 외부에 판매한 건이 없으므로 txLogs KY_to_BEST + AMT_to_BEST 기준 매입액으로 추정
-  const bestTx = txLogs.filter(t =>
-    inPeriod(ym(t.date)) &&
-    (t.type==='AMT_to_BEST' || t.type==='KY_to_BEST')
-  );
-  const bestRevenue = bestTx.reduce((s,t)=>s+t.amount,0);
+  // === BEST: 매출 없음, 매입만 (항상 환급 = 음수) ===
+  // BEST 매출 = 0
+  // BEST 매입세액 = bestPurchaseAmt / 11
+  // BEST 납부세액 = -매입세액 (음수)
+  const bestRevenue = 0;
+  const bestPurchaseVat = Math.round(bestPurchaseAmt / 11);
 
   // VAT = 매출(VAT포함) / 11 (공급가액의 10%)
   const vatAmt  = r => Math.round(r/11);
   const supplyAmt = r => Math.round(r*10/11);
 
-  // ★ 수입 매입세액 (총관리자 입력 수입가격 기준)
+  // ★ AMT 수입 매입세액 (총관리자 입력 수입가격 기준)
   const importVatAmt = (typeof calcImportVat === 'function') ? calcImportVat(startYm, endYm) : 0;
 
   return {
-    AMT: { revenue: amtRevenue, supply: supplyAmt(amtRevenue), vat: vatAmt(amtRevenue), importVat: importVatAmt, returnAmt: amtReturnAmt },
-    KY:  { revenue: kyRevenue,  supply: supplyAmt(kyRevenue),  vat: vatAmt(kyRevenue),  importVat: 0, returnAmt: 0 },
-    BEST:{ revenue: bestRevenue,supply: supplyAmt(bestRevenue),vat: vatAmt(bestRevenue), importVat: 0, returnAmt: 0 },
+    AMT: {
+      revenue: amtRevenue,
+      supply: supplyAmt(amtRevenue),
+      vat: vatAmt(amtRevenue),
+      importVat: importVatAmt,
+      returnAmt: amtReturnAmt
+    },
+    KY: {
+      revenue: kyRevenue,
+      supply: supplyAmt(kyRevenue),
+      vat: vatAmt(kyRevenue),
+      importVat: 0,
+      returnAmt: kyReturnAmt
+    },
+    BEST: {
+      revenue: bestRevenue,
+      supply: -Math.round(bestPurchaseAmt*10/11),  // 음수 표시 (환급)
+      vat: -bestPurchaseVat,                         // 음수 (환급)
+      importVat: 0,
+      returnAmt: 0,
+      purchaseAmt: bestPurchaseAmt                  // BEST가 받은 반품 총액 (매입)
+    },
   };
 }
 
@@ -7861,20 +7907,30 @@ function renderVatKpiCards(){
       const useImportVat = (c.key==='AMT' && d.importVat>0 && isSuper);
       const actualVat = useImportVat ? Math.max(0, d.vat - d.importVat) : d.vat;
       return `<div class="kpi" style="--kpi-color:${c.color};background:${c.bg}">
-        <div class="kpi-label" style="color:${c.color}">🧾 ${c.label} 예상 납부세액</div>
-        <div class="kpi-value" style="font-size:1.05rem;color:${c.color}">${fmt(actualVat)}</div>
+        <div class="kpi-label" style="color:${c.color}">🧾 ${c.label} ${c.key==='BEST' ? '예상 환급세액' : '예상 납부세액'}</div>
+        <div class="kpi-value" style="font-size:1.05rem;color:${c.key==='BEST' ? '#16a34a' : c.color}">${c.key==='BEST' && actualVat<0 ? '-'+fmt(Math.abs(actualVat)) : fmt(actualVat)}</div>
         ${useImportVat ? `
         <div style="font-size:.74rem;color:var(--text2);margin-top:3px">매출세액 ${fmt(d.vat)}원</div>
         <div style="font-size:.74rem;color:#16a34a;font-weight:600" title="총관리자 전용 표시">🔒 수입매입세액 -${fmt(d.importVat)}원</div>
         ` : ''}
         ${c.key==='AMT' && d.returnAmt>0 ? `
-        <div style="font-size:.72rem;color:#dc2626;margin-top:2px">↩️ 반품 차감 -${fmt(d.returnAmt)}원</div>
+        <div style="font-size:.72rem;color:#dc2626;margin-top:2px">↩️ AMT→BEST 반품 -${fmt(d.returnAmt)}원</div>
         ` : ''}
-        <div class="kpi-sub">공급가액 ${fmt(d.supply)}원 · 매출 ${fmt(d.revenue)}원</div>
+        ${c.key==='KY' && d.returnAmt>0 ? `
+        <div style="font-size:.72rem;color:#dc2626;margin-top:2px">↩️ KY→AMT 반품 -${fmt(d.returnAmt)}원</div>
+        ` : ''}
+        ${c.key==='BEST' && d.purchaseAmt>0 ? `
+        <div style="font-size:.72rem;color:#16a34a;margin-top:2px">📥 반품 수령 ${fmt(d.purchaseAmt)}원</div>
+        ` : ''}
+        <div class="kpi-sub">${
+          c.key==='BEST'
+            ? `매입세액 ${fmt(Math.abs(d.vat))}원 (환급)`
+            : `공급가액 ${fmt(d.supply)}원 · 매출 ${fmt(d.revenue)}원`
+        }</div>
         <div style="font-size:.68rem;color:var(--text3);margin-top:2px">${
-          c.key==='BEST' ? '※매입기준 추정'
+          c.key==='BEST' ? '※매입세액 환급 (매출 0원)'
           : useImportVat ? '매출세액-수입매입세액(🔒)'
-          : 'VAT포함 매출/11'
+          : 'VAT포함 매출/11 - 반품/11'
         }</div>
       </div>`;
     }).join('')}
