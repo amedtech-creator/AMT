@@ -4915,8 +4915,9 @@ async function issueTaxInvoice(){
       CorpName: p.invoicer.name,
       CEOName: p.invoicer.ceo,
       Addr: p.invoicer.address,
-      BizClass: p.invoicer.bizClass || '도매및 소매업',
-      BizType: p.invoicer.bizType || '의료용기구 소매업',
+      // ★ 바로빌 API: BizClass=종목, BizType=업태 (한국어 직관과 반대)
+      BizClass: p.invoicer.bizType || '의료용기구 소매업',
+      BizType: p.invoicer.bizClass || '도매및 소매업',
       ContactID: 'amtkorea1',  // ★ AMT 파트너 바로빌 가입 ID
       ContactName: p.invoicer.ceo,
       TEL: p.invoicer.tel || '',
@@ -4930,8 +4931,9 @@ async function issueTaxInvoice(){
       CorpName: p.invoicee.name,
       CEOName: p.invoicee.ceo,
       Addr: p.invoicee.address,
-      BizClass: p.invoicee.bizClass || '도매및 소매업',
-      BizType: p.invoicee.bizType || '의료용기구 소매업',
+      // ★ 바로빌 API: BizClass=종목, BizType=업태 (한국어 직관과 반대)
+      BizClass: p.invoicee.bizType || '의료용기구 소매업',
+      BizType: p.invoicee.bizClass || '도매및 소매업',
       ContactID: 'amtkorea',  // ★ KY 파트너 바로빌 가입 ID
       ContactName: p.invoicee.ceo,
       TEL: p.invoicee.tel || '',
@@ -11161,6 +11163,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   // 세션 복원
   window._amtAdminName = sess.email === 'kyunghoyou@gmail.com' ? '유경호'
+                       : sess.email === 'jejusaram77@gmail.com' ? '강승섭'
                        : sess.email === 'amedtech@gmail.com'   ? '강승섭' : sess.email;
   const badge = document.getElementById('amtAdminBadge');
   if(badge) badge.textContent = '👤 ' + window._amtAdminName;
@@ -11528,8 +11531,9 @@ async function issueBarobillFromTaxModal() {
       CorpName: KY_SUPPLIER.name,
       CEOName: KY_SUPPLIER.ceo,
       Addr: KY_SUPPLIER.address,
-      BizClass: KY_SUPPLIER.bizClass || '도매및 소매업',
-      BizType: KY_SUPPLIER.bizType || '의료용기구 소매업',
+      // ★ 바로빌 API: BizClass=종목, BizType=업태 (한국어 직관과 반대)
+      BizClass: KY_SUPPLIER.bizType || '의료용기구 소매업',
+      BizType: KY_SUPPLIER.bizClass || '도매및 소매업',
       ContactID: 'amtkorea',  // ★ KY 파트너 바로빌 가입 ID
       ContactName: KY_SUPPLIER.ceo,
       TEL: KY_SUPPLIER.tel || '',
@@ -11544,8 +11548,9 @@ async function issueBarobillFromTaxModal() {
       CorpName: data.dealerName || '',
       CEOName: data.dealerCeo || '',
       Addr: data.dealerAddr || '',
-      BizClass: data.dealerBizClass || '도매업',
-      BizType: data.dealerBizType || '의료기기',
+      // ★ 바로빌 API: BizClass=종목, BizType=업태 (한국어 직관과 반대)
+      BizClass: data.dealerBizType || '의료기기',
+      BizType: data.dealerBizClass || '도매업',
       ContactID: '',  // ★ 대리점은 바로빌 미가입이므로 비움
       ContactName: data.dealerCeo || '',
       TEL: data.dealerTel || '',
