@@ -8954,6 +8954,11 @@ function kyStartListener(){
             showKyNewOrderPopup(o);
             // ★ 텔레그램 발송 (총괄관리자 + 일반관리자 동시)
             //    단, AMT 관리자가 직접 발주입력한 건은 saveOrder에서 이미 발송했으므로 스킵
+            // ★ "대리점 발주 신청" 텔레그램 발송 비활성화 (2026-04-28)
+            //    KY 앱(orders-KY.html)의 sendTelegramOrder()가 이미 "📦 새 주문 접수" 메시지를 발송하므로 중복이었음
+            //    화면 팝업(showKyNewOrderPopup) + 브라우저 알림은 유지
+            //    필요 시 아래 코드 블록 주석 해제하면 복구 가능
+            /*
             if(!o.fromAmt) try{
               const itemLines = (o.items||[]).map(i => '  • ' + i.product + ' ' + fmt(i.qty) + '개 × ' + fmt(i.price) + '원');
               const nowStr = new Date().toLocaleString('ko-KR', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
@@ -8975,6 +8980,7 @@ function kyStartListener(){
               if(ADMIN1_CHAT_ID) sendTelegram(ADMIN1_CHAT_ID, tgLines.join('\n')).catch(()=>{});
               if(ADMIN2_CHAT_ID) sendTelegram(ADMIN2_CHAT_ID, tgLines.join('\n')).catch(()=>{});
             }catch(e){ console.warn('대리점 발주 텔레그램 발송 실패:', e); }
+            */
           });
           const badge = document.getElementById('kyNewBadge');
           if(badge){ badge.style.display='inline-block'; setTimeout(()=>badge.style.display='none',15000); }
