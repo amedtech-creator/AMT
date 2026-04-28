@@ -3529,6 +3529,9 @@ async function _doSaveOrder(){
   saveLS();
   await fbSaveAll();
 
+  // ★ 저장 직후 화면 즉시 갱신 (입력자에게 즉시 피드백)
+  try { refreshAll(); } catch(e) { console.warn('refreshAll 오류:', e); }
+
   // ★ KY주문 연동 (그룹 전체를 하나의 KY주문으로 등록)
   const fb = window._fb;
   if(fb && fb.ready){
@@ -6429,6 +6432,34 @@ async function _doSaveDealer(){
   if(!editingDealerId && !code){ toast('신규 대리점은 코드번호를 설정해야 합니다','error'); return; }
   if(code && code.length < 4){ toast('코드번호는 4자 이상이어야 합니다','error'); return; }
 
+  // ★ 이메일 중복 검증 (자기 자신 제외)
+  // 같은 이메일을 가진 대리점이 있으면 KY 앱에서 dealer 매칭 시 충돌 가능성 있음
+  const emailDup = dealers.find(d => d &&
+    d.id !== editingDealerId &&
+    (d.email||'').toLowerCase() === email.toLowerCase());
+  if(emailDup){
+    const proceed = confirm(
+      '⚠️ 같은 로그인 이메일을 사용하는 대리점이 이미 있습니다:\n\n' +
+      `• 기존: ${emailDup.name} (코드: ${emailDup.code||'?'})\n` +
+      `• 신규: ${name} (코드: ${code||'?'})\n\n` +
+      '같은 이메일을 사용하면 대리점 로그인/뷰체험 시 매칭 오류가 발생할 수 있습니다.\n' +
+      '코드가 서로 다르면 안전하게 구분되지만, 가능하면 이메일도 다르게 사용하시는 것을 권장합니다.\n\n' +
+      '계속 진행하시겠습니까?'
+    );
+    if(!proceed){ toast('저장 취소됨','info'); return; }
+  }
+  // ★ 코드 중복 검증 (자기 자신 제외) - 같은 이메일+같은 코드면 절대 안됨
+  if(code){
+    const codeDup = dealers.find(d => d &&
+      d.id !== editingDealerId &&
+      String(d.code||'') === String(code) &&
+      (d.email||'').toLowerCase() === email.toLowerCase());
+    if(codeDup){
+      toast(`❌ 같은 이메일+같은 코드의 대리점이 이미 있습니다: ${codeDup.name}`,'error');
+      return;
+    }
+  }
+
   const prods=[];
   document.querySelectorAll('#dmProducts .form-grid').forEach(row=>{
     const p=row.querySelector('.dp-prod').value.trim().toUpperCase();
@@ -7063,6 +7094,66 @@ function _mergeTombstones(remoteTomb){
 })();
 
 window._trackDelete = _trackDeleteCore;
+
+// ★ 대리점 데이터 무결성 진단 (콘솔에서 window._diagnoseDealers() 실행)
+//    - 이메일 중복 검사 (KY 앱 dealer 매칭 충돌 가능성 사전 발견)
+//    - 코드 중복 검사
+//    - 필수 필드 누락 검사
+window._diagnoseDealers = function(){
+  console.log('🔍 대리점 데이터 무결성 진단');
+  console.log('─'.repeat(60));
+  console.log('총 대리점: ' + dealers.length + '건');
+
+  // 1. 이메일 중복
+  const emailMap = {};
+  dealers.forEach(d => {
+    const e = (d.email||'').toLowerCase();
+    if(!e) return;
+    if(!emailMap[e]) emailMap[e] = [];
+    emailMap[e].push(d);
+  });
+  const emailDups = Object.entries(emailMap).filter(([e,arr]) => arr.length > 1);
+  if(emailDups.length === 0){
+    console.log('✅ 이메일 중복 없음');
+  } else {
+    console.warn('⚠️ 이메일 중복 ' + emailDups.length + '건 발견:');
+    emailDups.forEach(([e, arr]) => {
+      console.warn('   ' + e + ' → ' + arr.length + '개 대리점:');
+      arr.forEach(d => console.warn('     - ' + d.name + ' (id=' + d.id + ', code=' + d.code + ')'));
+    });
+    console.warn('   → 같은 이메일+다른 코드: KY 앱 매칭 시 코드로 정확히 구분됨 (안전 - 단 코드 검증 강화 필요)');
+    console.warn('   → 같은 이메일+같은 코드: 중대 결함 (즉시 수정 필요)');
+  }
+
+  // 2. 코드 중복 (같은 이메일 그룹 안에서)
+  let codeDupCount = 0;
+  emailDups.forEach(([e, arr]) => {
+    const codeMap = {};
+    arr.forEach(d => {
+      const c = String(d.code||'');
+      if(!codeMap[c]) codeMap[c] = [];
+      codeMap[c].push(d);
+    });
+    Object.entries(codeMap).filter(([c,a]) => a.length > 1).forEach(([c, a]) => {
+      console.error('🚨 같은 이메일+같은 코드 충돌: ' + e + ' / ' + c);
+      a.forEach(d => console.error('     - ' + d.name + ' (id=' + d.id + ')'));
+      codeDupCount++;
+    });
+  });
+  if(codeDupCount === 0 && emailDups.length > 0){
+    console.log('✅ 같은 이메일 그룹 내 코드 중복 없음 (정상 매칭 가능)');
+  }
+
+  // 3. 필수 필드 누락
+  const missing = dealers.filter(d => !d.email || !d.code || !d.name);
+  if(missing.length > 0){
+    console.warn('⚠️ 필수 필드 누락 대리점 ' + missing.length + '건:');
+    missing.forEach(d => console.warn('     - ' + (d.name||'?') + ' (id=' + d.id + ', email=' + (d.email||'없음') + ', code=' + (d.code||'없음') + ')'));
+  }
+
+  console.log('─'.repeat(60));
+  return { emailDups: emailDups.length, codeDups: codeDupCount, missing: missing.length };
+};
 
 // ★ 각 항목에 _v 타임스탬프 부여
 // Date.now() 사용 - millisecond precision, 일반적 clock drift는 거의 무시 가능
@@ -10283,7 +10374,7 @@ function _renderRoleSwitchMenu(dealerList){
     <div style="padding:10px 12px 6px;font-size:.72rem;color:var(--text2);font-weight:600;border-top:1px solid var(--border);margin-top:6px">대리점 뷰 (새 탭)</div>
     ${dealerList.length === 0 ? '<div style="padding:10px 12px;font-size:.75rem;color:#999">등록된 대리점이 없습니다</div>' :
       dealerList.map(d => `
-        <button onclick="impersonateDealer('${encodeURIComponent(d.email)}','${(d.name||'').replace(/'/g,"\\'")}')" style="width:100%;text-align:left;padding:9px 12px;border:none;background:#fff;border-radius:6px;cursor:pointer;font-size:.8rem;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
+        <button onclick="impersonateDealer('${encodeURIComponent(d.email)}','${(d.name||'').replace(/'/g,"\\'")}','${d.id||''}')" style="width:100%;text-align:left;padding:9px 12px;border:none;background:#fff;border-radius:6px;cursor:pointer;font-size:.8rem;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
           <span>🏢 ${d.name}</span>
           <span style="font-size:.68rem;color:#999;font-family:monospace">${d.email}</span>
         </button>
@@ -10321,7 +10412,7 @@ function exitImpersonation(){
   setTimeout(()=>location.reload(), 400);
 }
 
-function impersonateDealer(emailEncoded, dealerName){
+function impersonateDealer(emailEncoded, dealerName, dealerId){
   if(!_isRealSuperAdmin()){ toast('총괄관리자 전용 기능입니다','error'); return; }
   const email = decodeURIComponent(emailEncoded);
   if(!confirm(`"${dealerName}" 대리점 뷰로 새 탭을 여시겠습니까?\n\n• 읽기 전용 가장 모드로 접속됩니다\n• 기본으로 주문 저장이 차단됩니다 (미리보기 전용)\n• 원 대리점의 실제 로그인 세션과 분리됩니다`)) return;
@@ -10332,7 +10423,9 @@ function impersonateDealer(emailEncoded, dealerName){
   const kyBase = isGithubPages
     ? 'https://amedtech-creator.github.io/KY/orders-KY.html'
     : 'orders-KY.html';
-  const url = kyBase + '?impersonate=' + encodeURIComponent(email) + '&from=super&ts=' + Date.now();
+  // ★ dealerId 함께 전달 (이메일 충돌 안전 - 같은 이메일 다중 대리점에서도 정확히 매칭)
+  let url = kyBase + '?impersonate=' + encodeURIComponent(email) + '&from=super&ts=' + Date.now();
+  if(dealerId) url += '&dealerId=' + encodeURIComponent(dealerId);
   window.open(url, '_blank', 'noopener');
   const menu = document.getElementById('roleSwitchMenu');
   if(menu) menu.remove();
