@@ -693,8 +693,8 @@ const AMT_SUPPLIER = {
   // ★ 세금계산서 발행용 추가 정보
   tel:"070-8699-8151",
   hp:"010-4305-4680",
-  bizClass:"수출입업",
-  bizType:"도매및 소매업"
+  bizClass:"도매및 소매업",
+  bizType:"수출입업"
 };
 
 // ★ KY 직인 이미지 (base64 임베드 - 외부 파일 의존성 없음)
@@ -11287,7 +11287,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260429-v24')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260429-v25')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
