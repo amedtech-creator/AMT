@@ -2290,6 +2290,50 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
         </table>
       </div>
     </div>
+
+    <hr class="divider">
+
+    <!-- ═══════════ 법인세 비용 관리 ═══════════ -->
+    <div class="setting-section" id="corpTaxSection">
+      <h3>🏛️ 법인세 비용 관리</h3>
+      <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
+        매월 고정비, 연 1회 비용, AMT 수입비용을 관리합니다. 법인세 예상치 계산에 사용됩니다.<br>
+        <span style="color:var(--text3);font-size:.72rem">※ 입력하지 않은 달은 기본값(작년 평균)으로 자동 계산됨</span>
+      </p>
+
+      <!-- 회사 선택 + 연도 선택 -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <label style="font-size:.85rem;font-weight:700">회사:</label>
+        <select id="corpTaxCompany" onchange="renderCorpTaxCostsForm()" style="padding:6px 10px;font-size:.88rem;border:1px solid var(--border);border-radius:6px">
+          <option value="AMT">AMT</option>
+          <option value="KY">KY</option>
+          <option value="BEST">BEST</option>
+        </select>
+
+        <label style="font-size:.85rem;font-weight:700;margin-left:10px">연도:</label>
+        <select id="corpTaxYear" onchange="renderCorpTaxCostsForm()" style="padding:6px 10px;font-size:.88rem;border:1px solid var(--border);border-radius:6px">
+        </select>
+
+        <button class="btn btn-success btn-sm" onclick="saveCorpTaxCosts()" style="margin-left:auto">💾 저장</button>
+      </div>
+
+      <!-- 월별 고정비 입력 영역 -->
+      <div id="monthlyCostsBox" style="background:#f9fafb;padding:12px;border-radius:8px;margin-bottom:14px;border:1px solid var(--border)">
+        <!-- JavaScript로 렌더링 -->
+      </div>
+
+      <!-- 연간 1회 비용 입력 영역 -->
+      <div id="yearlyCostsBox" style="background:#fff7ed;padding:12px;border-radius:8px;margin-bottom:14px;border:1px solid #fed7aa">
+        <!-- JavaScript로 렌더링 -->
+      </div>
+
+      <!-- AMT 수입비용 (총괄 전용) -->
+      <div id="importCostsBox" style="background:#eff6ff;padding:12px;border-radius:8px;border:1px solid #bfdbfe;display:none">
+        <!-- JavaScript로 렌더링 - 총괄만 -->
+      </div>
+
+      <div id="corpTaxCostsMsg" style="margin-top:10px;font-size:.78rem"></div>
+    </div>
   </div>
 </div>
 
@@ -3713,6 +3757,7 @@ function renderDash(){
       </div>`;
     }).join('')}
     ${renderVatKpiCards()}
+    ${renderCorpTaxKpiCards()}
   `;
 
   document.getElementById('dashReceivable').innerHTML=`
@@ -7479,6 +7524,27 @@ function fbStartListener(){
     _applyRemoteSnap(snap.val());
   });
 
+  // ★ 법인세용 - 고정비/연간비용/수입비용 리스너
+  if(!window._costsListenerStarted){
+    window._costsListenerStarted = true;
+
+    fb.onValue(fb.ref(fb.db, 'fixed_costs'), (snap) => {
+      window._fixedCosts = snap.exists() ? snap.val() : {};
+      // 대시보드 갱신 (법인세 카드 재계산)
+      try { if(typeof renderDashboard==='function') renderDashboard(); } catch(e){}
+    });
+
+    fb.onValue(fb.ref(fb.db, 'yearly_costs'), (snap) => {
+      window._yearlyCosts = snap.exists() ? snap.val() : {};
+      try { if(typeof renderDashboard==='function') renderDashboard(); } catch(e){}
+    });
+
+    fb.onValue(fb.ref(fb.db, 'import_costs'), (snap) => {
+      window._importCosts = snap.exists() ? snap.val() : {};
+      try { if(typeof renderDashboard==='function') renderDashboard(); } catch(e){}
+    });
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // ★ 실시간 동기화 안전망 (폴링 + 탭 활성화 감지)
   //   - WebSocket 끊김, 탭 백그라운드 throttle, 첫 콜백 무시 등의
@@ -7973,6 +8039,586 @@ function calcVatByCompany(startYm, endYm){
   };
 }
 
+/* ═══════════════════════════════════════════════════════
+   법인세 (Corporate Tax) 예상 계산
+   ───────────────────────────────────────────────────────
+   - 법인 신고: 매년 3월 정기, 8월 중간예납
+   - 과세표준 2억 이하: 9% (지방세 포함 9.9%)
+   - 매출 - 매출원가 - 고정비 - 연간비용 - 수입비용 = 영업이익
+   - 영업이익 × 9.9% = 예상 법인세 (지방소득세 포함)
+═══════════════════════════════════════════════════════ */
+
+// 회사별 기본 월 고정비 (사용자가 입력 안 한 달은 이 값 사용)
+const DEFAULT_MONTHLY_COSTS = {
+  AMT: {
+    전기세: 46538,
+    '4대보험': 464730,
+    월세: 600000,
+    인터넷: 23468,
+    급여: 2300000,
+    전화: 6285,
+    세무사: 110000,
+    팩스: 294,
+    핸드폰: 1048
+  },
+  KY: {
+    택배비: 93791,
+    세무사: 110000
+  },
+  BEST: {
+    월세: 200000,
+    전기료: 3920,
+    프리랜서: 2943977
+  }
+};
+
+// 회사별 연 1회 고정비용 (3월에 일괄 반영)
+const DEFAULT_YEARLY_COSTS = {
+  AMT: {
+    세무사: 1500000,
+    공인인증서: 110000
+  },
+  KY: {
+    공인인증서: 110000,
+    박스비: 300000,
+    세무사: 1700000
+  },
+  BEST: {
+    공인인증서: 110000
+  }
+};
+
+/* 법인세 신고 기간 정보
+   - 정기신고: 매년 3월 31일 (전년 1~12월 결산)
+   - 중간예납: 매년 8월 31일 (당해 1~6월 가결산 또는 전년 1/2)
+*/
+function getCorpTaxPeriodInfo(){
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth()+1;
+
+  let periodLabel, startYm, endYm, dueDate;
+
+  if(m===1 || m===2 || m===3){
+    // 1~3월: 전년 정기신고 시즌
+    periodLabel = `${y-1}년 정기 (1~12월)`;
+    startYm = `${y-1}-01`;
+    endYm   = `${y-1}-12`;
+    dueDate = `${y}-03-31`;
+  } else if(m>=4 && m<=8){
+    // 4~8월: 당해 중간예납 시즌
+    periodLabel = `${y}년 중간예납 (1~6월)`;
+    startYm = `${y}-01`;
+    endYm   = `${y}-06`;
+    dueDate = `${y}-08-31`;
+  } else {
+    // 9~12월: 다음해 정기신고 준비
+    periodLabel = `${y}년 정기 (1~12월)`;
+    startYm = `${y}-01`;
+    endYm   = `${y}-12`;
+    dueDate = `${y+1}-03-31`;
+  }
+
+  const dueD = parseDateLocal(dueDate);
+  const todayD = parseDateLocal(ymd());
+  const diffMs = dueD - todayD;
+  const diffDays = Math.ceil(diffMs/(1000*60*60*24));
+
+  return { periodLabel, startYm, endYm, dueDate, diffDays };
+}
+
+/* 특정 회사의 특정 월 고정비 합계
+   - Firebase에 저장된 fixed_costs/{company}/{ym} 가 있으면 그 값
+   - 없으면 DEFAULT_MONTHLY_COSTS의 합계
+*/
+function getMonthlyFixedCost(company, ym){
+  const saved = window._fixedCosts?.[company]?.[ym];
+  if(saved && typeof saved==='object'){
+    return Object.values(saved).reduce((s,v)=>s+(Number(v)||0),0);
+  }
+  // 기본값
+  const def = DEFAULT_MONTHLY_COSTS[company] || {};
+  return Object.values(def).reduce((s,v)=>s+(Number(v)||0),0);
+}
+
+/* 특정 회사의 연간 고정비용(연 1회) 합계
+   - Firebase에 저장된 yearly_costs/{company}/{year} 가 있으면 그 값
+   - 없으면 DEFAULT_YEARLY_COSTS의 합계
+*/
+function getYearlyFixedCost(company, year){
+  const saved = window._yearlyCosts?.[company]?.[String(year)];
+  if(saved && typeof saved==='object'){
+    return Object.values(saved).reduce((s,v)=>s+(Number(v)||0),0);
+  }
+  const def = DEFAULT_YEARLY_COSTS[company] || {};
+  return Object.values(def).reduce((s,v)=>s+(Number(v)||0),0);
+}
+
+/* 특정 기간(startYm ~ endYm)의 회사별 고정비 합계 */
+function calcFixedCostsForPeriod(company, startYm, endYm){
+  // 월별 고정비
+  const startY = parseInt(startYm.split('-')[0]);
+  const startM = parseInt(startYm.split('-')[1]);
+  const endY = parseInt(endYm.split('-')[0]);
+  const endM = parseInt(endYm.split('-')[1]);
+
+  let monthly = 0;
+  let y = startY, m = startM;
+  while(y<endY || (y===endY && m<=endM)){
+    const ym = `${y}-${String(m).padStart(2,'0')}`;
+    monthly += getMonthlyFixedCost(company, ym);
+    m++;
+    if(m>12){ m=1; y++; }
+  }
+
+  // 연간비용: 시작년도와 종료년도가 다르면 양쪽 다 (대부분 같은 해)
+  // 단순화: 시작년도 기준 1년치 비용 (1~12월 기간이면 1번, 부분 기간이면 비례)
+  const monthsInPeriod = (endY-startY)*12 + (endM-startM+1);
+  const yearly = getYearlyFixedCost(company, startY) * (monthsInPeriod / 12);
+
+  return Math.round(monthly + yearly);
+}
+
+/* 특정 기간의 AMT 수입비용 합계 (총괄 입력 분) */
+function calcImportCostsForPeriod(startYm, endYm){
+  if(!window._importCosts) return 0;
+  let total = 0;
+  Object.entries(window._importCosts).forEach(([ym, amount])=>{
+    if(ym>=startYm && ym<=endYm){
+      total += Number(amount)||0;
+    }
+  });
+  return total;
+}
+
+/* 회사별 법인세 계산
+   ───────────────────────────────────────────────────
+   ★ 부가가치세 계산 로직(calcVatByCompany)과 정합:
+   - KY 매출: orders 합계 - (KY→AMT 반품)
+   - AMT 매출: internalTrades 합계 - (AMT→BEST 반품)
+   - BEST: 매출 0, 매입 = (AMT→BEST + KY→BEST) 반품 합계
+   - 모든 금액은 VAT 제외 공급가액 기준 (총액/1.1)
+   
+   영업이익 = 매출(공급가액) - 매출원가(공급가액) - 고정비
+   법인세 = 영업이익 × 9.9% (양수일 때만)
+*/
+function calcCorpTaxByCompany(startYm, endYm){
+  const inPeriod = ds => ds >= startYm && ds <= endYm+'-31';
+  const supplyOf = total => Math.round(total*10/11); // VAT 포함 → 공급가액
+
+  // ===== KY 매출 (VAT 포함 → 공급가액) =====
+  const kyOrdersInP = orders.filter(o => inPeriod(ym(o.orderDate)));
+  let kyRevenueTotal = kyOrdersInP.reduce((s,o)=>s+orderAmount(o),0);
+
+  // ===== AMT 매출 (internalTrades, VAT 포함 → 공급가액) =====
+  const amtIntTrades = (typeof internalTrades !== 'undefined' ? internalTrades : []).filter(t =>
+    inPeriod(ym(t.date))
+  );
+  let amtRevenueTotal = amtIntTrades.reduce((s,t)=>s+(Number(t.total)||0),0);
+
+  // ===== bestReturns 분류 (반품 처리, 부가세 계산과 동일) =====
+  let kyReturnAmt = 0;       // KY → AMT 반품 (KY 매출 차감)
+  let amtReturnAmt = 0;      // AMT → BEST 반품 (AMT 매출 차감, BEST 매입 발생)
+  let bestPurchaseAmt = 0;   // BEST 매입 합계 (반품 수령)
+
+  (typeof bestReturns !== 'undefined' ? bestReturns : []).forEach(r => {
+    const ft = r.fromType || (r.from==='AMT' ? 'AMT_to_BEST' : r.from==='KY' ? 'KY_to_BEST' : '');
+    const d = r.date || r.createdAt || '';
+    if(!inPeriod(ym(d))) return;
+    const amt = Number(r.total)||0;
+    if(ft === 'KY_to_AMT'){
+      kyReturnAmt += amt;
+    } else if(ft === 'AMT_to_BEST'){
+      amtReturnAmt += amt;
+      bestPurchaseAmt += amt;
+    } else if(ft === 'KY_to_BEST'){
+      kyReturnAmt += amt;
+      bestPurchaseAmt += amt;
+    }
+  });
+
+  // 반품 차감 후 매출 (음수 방지)
+  kyRevenueTotal = Math.max(0, kyRevenueTotal - kyReturnAmt);
+  amtRevenueTotal = Math.max(0, amtRevenueTotal - amtReturnAmt);
+
+  // ===== 공급가액으로 변환 =====
+  const kyRevenueSupply  = supplyOf(kyRevenueTotal);
+  const amtRevenueSupply = supplyOf(amtRevenueTotal);
+
+  // ===== 매출원가 =====
+  // KY 매출원가 = AMT가 KY에 공급한 금액 (internalTrades 합계의 공급가액)
+  // (KY가 AMT로부터 산 가격이 KY의 매출원가)
+  const kyCogsTotal = amtIntTrades.reduce((s,t)=>s+(Number(t.total)||0),0);
+  const kyCogsSupply = supplyOf(kyCogsTotal);
+
+  // AMT 매출원가 = 수입비용 (총괄 입력, VAT 별도 가정 → 공급가액으로 봄)
+  const amtImportCost = calcImportCostsForPeriod(startYm, endYm);
+
+  // BEST 매출원가 = 0 (매출 없음)
+  // BEST 비용 = 받은 반품 금액의 공급가액 (재고 매입 = 비용 처리)
+  const bestPurchaseSupply = supplyOf(bestPurchaseAmt);
+
+  // ===== 고정비 =====
+  const amtFixed = calcFixedCostsForPeriod('AMT', startYm, endYm);
+  const kyFixed = calcFixedCostsForPeriod('KY', startYm, endYm);
+  const bestFixed = calcFixedCostsForPeriod('BEST', startYm, endYm);
+
+  // ===== 영업이익 =====
+  const amtProfit = amtRevenueSupply - amtImportCost - amtFixed;
+  const kyProfit = kyRevenueSupply - kyCogsSupply - kyFixed;
+  // BEST는 매출 0이고, 받은 반품(매입)+고정비가 모두 비용 → 항상 적자
+  const bestProfit = 0 - bestPurchaseSupply - bestFixed;
+
+  // ===== 법인세 (과세표준 양수일 때만, 9.9%) =====
+  const calcTax = (profit) => profit > 0 ? Math.round(profit * 0.099) : 0;
+
+  return {
+    AMT: {
+      revenue: amtRevenueSupply,
+      cogs: amtImportCost,
+      returnAmt: amtReturnAmt,    // 반품 차감 표시용
+      fixedCost: amtFixed,
+      profit: amtProfit,
+      tax: calcTax(amtProfit),
+    },
+    KY: {
+      revenue: kyRevenueSupply,
+      cogs: kyCogsSupply,
+      returnAmt: kyReturnAmt,     // 반품 차감 표시용
+      fixedCost: kyFixed,
+      profit: kyProfit,
+      tax: calcTax(kyProfit),
+    },
+    BEST: {
+      revenue: 0,
+      cogs: bestPurchaseSupply,   // 받은 반품 = 매입(비용)
+      returnAmt: 0,
+      fixedCost: bestFixed,
+      profit: bestProfit,
+      tax: calcTax(bestProfit),   // 항상 0 (적자)
+    },
+  };
+}
+
+/* 법인세 KPI 카드 렌더링 (대시보드) */
+function renderCorpTaxKpiCards(){
+  const { periodLabel, startYm, endYm, dueDate, diffDays } = getCorpTaxPeriodInfo();
+  const taxData = calcCorpTaxByCompany(startYm, endYm);
+  const urgentColor = diffDays<=30 ? 'var(--red)' : diffDays<=60 ? 'var(--yellow)' : '#10b981';
+  const urgentBg    = diffDays<=30 ? '#fef2f2' : diffDays<=60 ? '#fffbeb' : '#f0fdf4';
+  const companies   = [
+    {key:'AMT',  color:'var(--amt)',  bg:'var(--amt-bg)',  label:'AMT'},
+    {key:'KY',   color:'var(--ky)',   bg:'var(--ky-bg)',   label:'KY'},
+    {key:'BEST', color:'var(--best)', bg:'var(--best-bg)', label:'BEST'},
+  ];
+
+  return `
+    <div class="kpi" style="--kpi-color:${urgentColor};grid-column:1/-1;background:${urgentBg};border-color:${urgentColor}30">
+      <div class="kpi-label" style="color:${urgentColor}">🏛️ 법인세 신고기간</div>
+      <div style="font-size:.85rem;font-weight:800;color:var(--text);margin:4px 0">${periodLabel}</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">
+        <span style="font-size:.75rem;font-weight:600;color:var(--text2)">📅 신고마감 <b style="color:${urgentColor}">${dueDate}</b></span>
+        <span style="font-size:.75rem;font-weight:600;color:${urgentColor}">⏰ D${diffDays>=0?'-'+diffDays:'+'+Math.abs(diffDays)}</span>
+      </div>
+    </div>
+    ${companies.map(c=>{
+      const d = taxData[c.key];
+      const profitColor = d.profit >= 0 ? c.color : '#dc2626';
+      return `<div class="kpi" style="--kpi-color:${c.color};background:${c.bg}">
+        <div class="kpi-label" style="color:${c.color}">🏛️ ${c.label} 예상 법인세</div>
+        <div class="kpi-value" style="font-size:1.05rem;color:${profitColor}">${fmt(d.tax)}</div>
+        <div class="kpi-sub">
+          ${d.profit >= 0
+            ? `과세표준 ${fmt(d.profit)}원 × 9.9%`
+            : `<span style="color:#dc2626">결손 ${fmt(Math.abs(d.profit))}원 (법인세 0원)</span>`}
+        </div>
+        ${d.returnAmt>0 ? `
+        <div style="font-size:.7rem;color:#dc2626;margin-top:2px">
+          ↩️ 반품 차감 -${fmt(d.returnAmt)}원
+        </div>` : ''}
+        <div style="font-size:.68rem;color:var(--text3);margin-top:2px">
+          ${c.key==='BEST'
+            ? `매입(반품수령) ${fmt(d.cogs)}원 · 고정비 ${fmt(d.fixedCost)}원`
+            : `매출 ${fmt(d.revenue)}원 · 원가 ${fmt(d.cogs)}원 · 고정비 ${fmt(d.fixedCost)}원`}
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+/* ═══════════════════════════════════════════════════════
+   법인세 비용 관리 (설정화면) - 월별 고정비 입력
+═══════════════════════════════════════════════════════ */
+
+// 연도 선택 옵션 초기화
+function initCorpTaxYearSelect(){
+  const sel = document.getElementById('corpTaxYear');
+  if(!sel || sel.options.length>0) return;
+  const currentY = new Date().getFullYear();
+  for(let y = currentY-1; y <= currentY+1; y++){
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y + '년';
+    if(y === currentY) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+// 설정화면 렌더링 (월별 + 연간 + 수입)
+function renderCorpTaxCostsForm(){
+  initCorpTaxYearSelect();
+  const company = document.getElementById('corpTaxCompany')?.value || 'AMT';
+  const year = parseInt(document.getElementById('corpTaxYear')?.value || new Date().getFullYear());
+
+  const monthlyBox = document.getElementById('monthlyCostsBox');
+  const yearlyBox = document.getElementById('yearlyCostsBox');
+  const importBox = document.getElementById('importCostsBox');
+  if(!monthlyBox || !yearlyBox) return;
+
+  // ===== 월별 고정비 영역 =====
+  const monthlyDef = DEFAULT_MONTHLY_COSTS[company] || {};
+  const items = Object.keys(monthlyDef);
+
+  let monthlyHtml = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div style="font-weight:700;font-size:.92rem">📅 ${year}년 ${company} 월별 고정비</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="copyDefaultMonthly('${company}', ${year})" style="font-size:.72rem">📋 모든 달에 기본값 복사</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetDefaultMonthly('${company}')" style="font-size:.72rem;color:var(--red)">🔄 기본값 초기화</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table style="width:100%;border-collapse:collapse;font-size:.78rem;min-width:760px">
+        <thead>
+          <tr style="background:#e5e7eb">
+            <th style="padding:6px;border:1px solid #d1d5db;text-align:left;position:sticky;left:0;background:#e5e7eb;min-width:90px">항목</th>`;
+  for(let m=1; m<=12; m++){
+    monthlyHtml += `<th style="padding:6px;border:1px solid #d1d5db;text-align:center;min-width:75px">${m}월</th>`;
+  }
+  monthlyHtml += `</tr></thead><tbody>`;
+
+  items.forEach(item => {
+    monthlyHtml += `<tr>
+      <td style="padding:6px;border:1px solid #d1d5db;font-weight:600;position:sticky;left:0;background:#fff">${item}</td>`;
+    for(let m=1; m<=12; m++){
+      const ym = `${year}-${String(m).padStart(2,'0')}`;
+      const saved = window._fixedCosts?.[company]?.[ym]?.[item];
+      const value = (saved !== undefined && saved !== null) ? saved : monthlyDef[item];
+      monthlyHtml += `<td style="padding:2px;border:1px solid #d1d5db">
+        <input type="number" 
+          id="mc_${company}_${ym}_${item}" 
+          value="${value}" 
+          style="width:100%;padding:4px;border:1px solid #e5e7eb;border-radius:4px;font-size:.75rem;text-align:right;font-family:monospace">
+      </td>`;
+    }
+    monthlyHtml += `</tr>`;
+  });
+
+  // 합계 행
+  monthlyHtml += `<tr style="background:#f3f4f6;font-weight:700">
+    <td style="padding:6px;border:1px solid #d1d5db;position:sticky;left:0;background:#f3f4f6">합계</td>`;
+  for(let m=1; m<=12; m++){
+    monthlyHtml += `<td id="mc_total_${company}_${year}_${m}" style="padding:6px;border:1px solid #d1d5db;text-align:right;font-family:monospace;font-size:.74rem"></td>`;
+  }
+  monthlyHtml += `</tr></tbody></table></div>`;
+  monthlyBox.innerHTML = monthlyHtml;
+
+  // 합계 계산
+  updateMonthlyTotals(company, year);
+
+  // 입력 변경 시 합계 갱신
+  items.forEach(item => {
+    for(let m=1; m<=12; m++){
+      const ym = `${year}-${String(m).padStart(2,'0')}`;
+      const inp = document.getElementById(`mc_${company}_${ym}_${item}`);
+      if(inp) inp.addEventListener('input', () => updateMonthlyTotals(company, year));
+    }
+  });
+
+  // ===== 연간 1회 비용 영역 =====
+  const yearlyDef = DEFAULT_YEARLY_COSTS[company] || {};
+  const yearlyItems = Object.keys(yearlyDef);
+  let yearlyHtml = `
+    <div style="font-weight:700;font-size:.92rem;margin-bottom:10px">📆 ${year}년 ${company} 연간 1회 비용 (3월 일괄 반영)</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">`;
+  yearlyItems.forEach(item => {
+    const saved = window._yearlyCosts?.[company]?.[String(year)]?.[item];
+    const value = (saved !== undefined && saved !== null) ? saved : yearlyDef[item];
+    yearlyHtml += `<div>
+      <label style="display:block;font-size:.74rem;color:var(--text2);margin-bottom:3px">${item}</label>
+      <input type="number" 
+        id="yc_${company}_${year}_${item}" 
+        value="${value}" 
+        style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-family:monospace;text-align:right">
+    </div>`;
+  });
+  yearlyHtml += `</div>
+    <div style="margin-top:8px;font-size:.7rem;color:var(--text3)">합계: <b id="yc_total_${company}_${year}" style="font-family:monospace"></b>원</div>`;
+  yearlyBox.innerHTML = yearlyHtml;
+
+  updateYearlyTotal(company, year);
+  yearlyItems.forEach(item => {
+    const inp = document.getElementById(`yc_${company}_${year}_${item}`);
+    if(inp) inp.addEventListener('input', () => updateYearlyTotal(company, year));
+  });
+
+  // ===== AMT 수입비용 (총괄만) =====
+  const isSuper = (typeof isSuperAdmin === 'function') ? isSuperAdmin() : false;
+  if(isSuper && company === 'AMT'){
+    importBox.style.display = 'block';
+    let importHtml = `
+      <div style="font-weight:700;font-size:.92rem;margin-bottom:10px">🚢 ${year}년 AMT 수입비용 <span style="font-size:.72rem;font-weight:400;color:var(--text2)">(총괄 전용 · 수입 발생한 달만 입력)</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">`;
+    for(let m=1; m<=12; m++){
+      const ym = `${year}-${String(m).padStart(2,'0')}`;
+      const saved = window._importCosts?.[ym] || 0;
+      importHtml += `<div>
+        <label style="display:block;font-size:.74rem;color:var(--text2);margin-bottom:3px">${m}월</label>
+        <input type="number" 
+          id="ic_${ym}" 
+          value="${saved}" 
+          placeholder="0"
+          style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-family:monospace;text-align:right">
+      </div>`;
+    }
+    importHtml += `</div>
+      <div style="margin-top:8px;font-size:.7rem;color:var(--text3)">연간 수입비용 합계: <b id="ic_total_${year}" style="font-family:monospace"></b>원</div>`;
+    importBox.innerHTML = importHtml;
+
+    updateImportTotal(year);
+    for(let m=1; m<=12; m++){
+      const ym = `${year}-${String(m).padStart(2,'0')}`;
+      const inp = document.getElementById(`ic_${ym}`);
+      if(inp) inp.addEventListener('input', () => updateImportTotal(year));
+    }
+  } else {
+    importBox.style.display = 'none';
+  }
+}
+
+function updateMonthlyTotals(company, year){
+  const items = Object.keys(DEFAULT_MONTHLY_COSTS[company] || {});
+  for(let m=1; m<=12; m++){
+    const ym = `${year}-${String(m).padStart(2,'0')}`;
+    let sum = 0;
+    items.forEach(item => {
+      const inp = document.getElementById(`mc_${company}_${ym}_${item}`);
+      if(inp) sum += Number(inp.value)||0;
+    });
+    const cell = document.getElementById(`mc_total_${company}_${year}_${m}`);
+    if(cell) cell.textContent = fmt(sum);
+  }
+}
+
+function updateYearlyTotal(company, year){
+  const items = Object.keys(DEFAULT_YEARLY_COSTS[company] || {});
+  let sum = 0;
+  items.forEach(item => {
+    const inp = document.getElementById(`yc_${company}_${year}_${item}`);
+    if(inp) sum += Number(inp.value)||0;
+  });
+  const cell = document.getElementById(`yc_total_${company}_${year}`);
+  if(cell) cell.textContent = fmt(sum);
+}
+
+function updateImportTotal(year){
+  let sum = 0;
+  for(let m=1; m<=12; m++){
+    const ym = `${year}-${String(m).padStart(2,'0')}`;
+    const inp = document.getElementById(`ic_${ym}`);
+    if(inp) sum += Number(inp.value)||0;
+  }
+  const cell = document.getElementById(`ic_total_${year}`);
+  if(cell) cell.textContent = fmt(sum);
+}
+
+// 모든 달에 기본값 복사
+function copyDefaultMonthly(company, year){
+  if(!confirm(`${year}년 ${company} 모든 달에 기본값을 채우시겠습니까?\n(이미 입력된 값은 덮어씌워집니다)`)) return;
+  const def = DEFAULT_MONTHLY_COSTS[company] || {};
+  Object.entries(def).forEach(([item, value]) => {
+    for(let m=1; m<=12; m++){
+      const ym = `${year}-${String(m).padStart(2,'0')}`;
+      const inp = document.getElementById(`mc_${company}_${ym}_${item}`);
+      if(inp) inp.value = value;
+    }
+  });
+  updateMonthlyTotals(company, year);
+  toast(`✅ ${company} ${year}년 기본값 복사 완료 (저장 버튼 눌러주세요)`,'info');
+}
+
+// 기본값 초기화
+function resetDefaultMonthly(company){
+  toast(`💡 ${company} 기본값은 작년 평균치입니다. 코드 내부에 정의됨.`,'info');
+}
+
+// 저장
+async function saveCorpTaxCosts(){
+  const fb = window._fb;
+  if(!fb || !fb.ready){
+    toast('Firebase 미연결','error');
+    return;
+  }
+  const company = document.getElementById('corpTaxCompany').value;
+  const year = parseInt(document.getElementById('corpTaxYear').value);
+  const msg = document.getElementById('corpTaxCostsMsg');
+
+  try {
+    // 월별 고정비 저장
+    const monthlyItems = Object.keys(DEFAULT_MONTHLY_COSTS[company] || {});
+    const monthlyData = {};
+    for(let m=1; m<=12; m++){
+      const ym = `${year}-${String(m).padStart(2,'0')}`;
+      monthlyData[ym] = {};
+      monthlyItems.forEach(item => {
+        const inp = document.getElementById(`mc_${company}_${ym}_${item}`);
+        monthlyData[ym][item] = Number(inp?.value)||0;
+      });
+    }
+    await fb.set(fb.ref(fb.db, `fixed_costs/${company}`), {
+      ...(window._fixedCosts?.[company] || {}),
+      ...monthlyData
+    });
+
+    // 연간 비용 저장
+    const yearlyItems = Object.keys(DEFAULT_YEARLY_COSTS[company] || {});
+    const yearlyData = {};
+    yearlyItems.forEach(item => {
+      const inp = document.getElementById(`yc_${company}_${year}_${item}`);
+      yearlyData[item] = Number(inp?.value)||0;
+    });
+    await fb.set(fb.ref(fb.db, `yearly_costs/${company}/${year}`), yearlyData);
+
+    // AMT 수입비용 저장 (총괄만, AMT 회사일 때만)
+    const isSuper = (typeof isSuperAdmin === 'function') ? isSuperAdmin() : false;
+    if(isSuper && company === 'AMT'){
+      const importData = {};
+      for(let m=1; m<=12; m++){
+        const ym = `${year}-${String(m).padStart(2,'0')}`;
+        const inp = document.getElementById(`ic_${ym}`);
+        const val = Number(inp?.value)||0;
+        importData[ym] = val;
+      }
+      // 기존 데이터 보존하면서 해당 연도만 업데이트
+      const existing = window._importCosts || {};
+      const merged = { ...existing };
+      Object.entries(importData).forEach(([ym, val])=>{
+        merged[ym] = val;
+      });
+      await fb.set(fb.ref(fb.db, 'import_costs'), merged);
+    }
+
+    if(msg){
+      msg.innerHTML = `<span style="color:#16a34a;font-weight:600">✅ ${year}년 ${company} 비용 저장 완료</span>`;
+      setTimeout(()=>{ msg.innerHTML = ''; }, 3000);
+    }
+    toast('✅ 저장 완료','success');
+  } catch(e){
+    if(msg) msg.innerHTML = `<span style="color:#dc2626;font-weight:600">❌ 저장 실패: ${e.message}</span>`;
+    toast('저장 실패: '+e.message,'error');
+  }
+}
+
 function renderVatKpiCards(){
   const { periodLabel, startYm, endYm, dueDate, diffDays } = getVatPeriodInfo();
   const vatData = calcVatByCompany(startYm, endYm);
@@ -8203,6 +8849,10 @@ function nav(btn){
     // ★ 대리점 코드 목록도 자동 로드
     if(typeof loadDealerCodes === 'function'){
       try { loadDealerCodes(); } catch(e) { console.warn('대리점 목록 로드 실패:', e); }
+    }
+    // ★ 법인세 비용 입력 폼 렌더링
+    if(typeof renderCorpTaxCostsForm === 'function'){
+      try { renderCorpTaxCostsForm(); } catch(e) { console.warn('법인세 비용 폼 로드 실패:', e); }
     }
   }
   // ★ 이력조회 탭 진입 시 자동 로드
@@ -11287,7 +11937,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260429-v25')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260502-v26')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
