@@ -3842,8 +3842,8 @@ function renderOrderTableHtml(list, compact=false){
         <td>${statusBadge(o)}</td>
         ${!compact?`<td class="td-c">
           <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
-            <button class="btn btn-outline btn-xs" onclick="openEditOrder(${JSON.stringify(o.id||'')})">✏️ 수정</button>
-            <button class="btn btn-danger btn-xs" onclick="delOrder(${JSON.stringify(o.id||'')})">✕</button>
+            <button class="btn btn-outline btn-xs" onclick="openEditOrder(${jsAttr(o.id||'')})">✏️ 수정</button>
+            <button class="btn btn-danger btn-xs" onclick="delOrder(${jsAttr(o.id||'')})">✕</button>
           </div>
         </td>`:''}
       </tr>`;
@@ -3907,7 +3907,7 @@ function showMarkDoneModal(id){
         <input type="date" id="markDoneDate" value="${today()}"
           style="width:100%;padding:9px 10px;border:2px solid #2563eb;border-radius:8px;font-size:.95rem;font-weight:600;color:#1e3a5f;box-sizing:border-box">
         <div style="display:flex;gap:6px;margin-top:6px">
-          <button type="button" onclick="document.getElementById('markDoneDate').value=${JSON.stringify(o.dueDate||'')}"
+          <button type="button" onclick="document.getElementById('markDoneDate').value=${jsAttr(o.dueDate||'')}"
             style="flex:1;padding:6px 4px;border-radius:6px;border:1px solid #d1d5db;background:#f1f5f9;font-size:.75rem;cursor:pointer">
             예정일로 (${escapeHtml(o.dueDate||'')})
           </button>
@@ -4238,8 +4238,8 @@ function showDayDetail(ds){
             <td class="td-mono td-r">${o.fee?fmt(o.fee):'-'}</td>
             <td class="td-mono td-r">${totalCell}</td>
             <td>${statusBadge(o)}</td>
-            <td>${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone(${JSON.stringify(o.id||'')})">✓ 수금</button>`:
-              `<button class="btn btn-ghost btn-xs" onclick="cancelDone(${JSON.stringify(o.id||'')})">취소</button>`}</td>
+            <td>${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone(${jsAttr(o.id||'')})">✓ 수금</button>`:
+              `<button class="btn btn-ghost btn-xs" onclick="cancelDone(${jsAttr(o.id||'')})">취소</button>`}</td>
           </tr>`;
         }).join('');
       })()}
@@ -4357,8 +4357,8 @@ function renderRecList(){
               <td class="td-mono td-r">${totalCell}</td>
               <td>${statusBadge(o)}</td>
               <td><div style="display:flex;gap:4px">
-                ${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone(${JSON.stringify(o.id||'')})">✓ 수금</button>`
-                  :`<button class="btn btn-ghost btn-xs" onclick="cancelDone(${JSON.stringify(o.id||'')})">취소</button>`}
+                ${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone(${jsAttr(o.id||'')})">✓ 수금</button>`
+                  :`<button class="btn btn-ghost btn-xs" onclick="cancelDone(${jsAttr(o.id||'')})">취소</button>`}
               </div></td>
             </tr>`;
           }).join('');
@@ -4541,8 +4541,8 @@ function renderInvHistory(){
       const autoReason = i.relOrder ? '발주' : i.relInternal ? '내부거래' : i.relKyOrder ? 'KY주문' : '';
       const actionCell = isAuto
         ? `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:6px;font-size:.68rem;font-weight:600" title="${autoReason}에서 자동 생성됨 - 원천에서 수정/삭제하세요">🔒 ${autoReason}</span>`
-        : `<button class="btn btn-outline btn-xs" onclick="openEditInvLog(${JSON.stringify(i.id||'')})" style="padding:3px 7px;margin-right:3px" title="수정">✏️</button>
-           <button class="btn btn-danger btn-xs" onclick="deleteInvLog(${JSON.stringify(i.id||'')})" style="padding:3px 7px" title="삭제">🗑</button>`;
+        : `<button class="btn btn-outline btn-xs" onclick="openEditInvLog(${jsAttr(i.id||'')})" style="padding:3px 7px;margin-right:3px" title="수정">✏️</button>
+           <button class="btn btn-danger btn-xs" onclick="deleteInvLog(${jsAttr(i.id||'')})" style="padding:3px 7px" title="삭제">🗑</button>`;
       return `<tr>
         <td class="td-mono">${escapeHtml(i.date||'')}</td>
         <td><span class="${co==='AMT'?'company-badge-amt':'company-badge-ky'}">${co}</span></td>
@@ -5279,8 +5279,8 @@ function renderAdjHistory(){
           <td style="font-size:.75rem;color:var(--text2);max-width:120px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.memo||'')}</td>
           <td class="td-mono" style="font-size:.72rem;color:var(--text3);white-space:nowrap">${createdAt}</td>
           <td class="td-c" style="white-space:nowrap">
-            <button class="btn btn-outline btn-xs" onclick="editAdjEntry(${JSON.stringify(t.id||'')})" style="margin-right:4px">✏️</button>
-            <button class="btn btn-danger btn-xs" onclick="deleteAdjEntry(${JSON.stringify(t.id||'')})">✕</button>
+            <button class="btn btn-outline btn-xs" onclick="editAdjEntry(${jsAttr(t.id||'')})" style="margin-right:4px">✏️</button>
+            <button class="btn btn-danger btn-xs" onclick="deleteAdjEntry(${jsAttr(t.id||'')})">✕</button>
           </td>
         </tr>`;
       }).join('')}
@@ -5718,8 +5718,8 @@ function renderTxList(){
           </td>
           <td class="td-mono td-r" style="color:var(--blue);font-weight:700;white-space:nowrap">${amtDisplay}</td>
           <td style="font-size:.73rem;color:var(--text2);max-width:80px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.memo||'')}</td>
-          <td class="td-c"><button class="btn btn-outline btn-xs" onclick="openEditTx(${JSON.stringify(t.id||'')})">✏️</button></td>
-          <td class="td-c"><button class="btn btn-danger btn-xs" onclick="deleteTx(${JSON.stringify(t.id||'')})">✕</button></td>
+          <td class="td-c"><button class="btn btn-outline btn-xs" onclick="openEditTx(${jsAttr(t.id||'')})">✏️</button></td>
+          <td class="td-c"><button class="btn btn-danger btn-xs" onclick="deleteTx(${jsAttr(t.id||'')})">✕</button></td>
         </tr>`;
       }).join('')}
       </tbody>
@@ -6040,8 +6040,8 @@ function renderBestReturnList(){
           <td class="td-mono td-r tx-in">${fmt(r.total)}원</td>
           <td style="font-size:.75rem;color:var(--text2)">${escapeHtml(r.memo||'')}</td>
           <td class="td-c" style="white-space:nowrap">
-            <button class="btn btn-outline btn-xs" onclick="openEditReturn(${JSON.stringify(r.id||'')})" style="margin-bottom:2px">✏️</button>
-            <button class="btn btn-danger btn-xs" onclick="deleteBestReturn(${JSON.stringify(r.id||'')})">✕</button>
+            <button class="btn btn-outline btn-xs" onclick="openEditReturn(${jsAttr(r.id||'')})" style="margin-bottom:2px">✏️</button>
+            <button class="btn btn-danger btn-xs" onclick="deleteBestReturn(${jsAttr(r.id||'')})">✕</button>
           </td>
         </tr>`;
       }).join('')}
@@ -6176,8 +6176,8 @@ function renderDealerCards(){
       <div class="dealer-card-header">
         <div class="dealer-name">${escapeHtml(d.name)}</div>
         <div class="dealer-actions">
-          <button class="btn btn-outline btn-xs" onclick="openDealerModal(${JSON.stringify(d.id||'')})" style="padding:5px 12px">✏️ 수정</button>
-          <button class="btn btn-danger btn-xs" onclick="deleteDealer(${JSON.stringify(d.id||'')})" style="padding:5px 12px;margin-left:8px">🗑️ 삭제</button>
+          <button class="btn btn-outline btn-xs" onclick="openDealerModal(${jsAttr(d.id||'')})" style="padding:5px 12px">✏️ 수정</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteDealer(${jsAttr(d.id||'')})" style="padding:5px 12px;margin-left:8px">🗑️ 삭제</button>
         </div>
       </div>
       <div class="dealer-products">${d.products.map(p=>`<span class="badge" style="background:${pColors[p.product]||'var(--gray)'}20;color:${pColors[p.product]||'var(--gray)'}">${escapeHtml(p.product)} ${fmt(p.price)}원</span>`).join('')}</div>
@@ -9474,7 +9474,7 @@ async function kyRenderHistory(){
         <div style="font-size:.8rem;color:var(--text2);margin-bottom:4px">${items}</div>
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:.7rem;color:var(--text3);font-family:monospace">
           <span>주문 ${escapeHtml(o.orderDate||'')} · 처리 ${shippedAt}</span>
-          ${isSuper ? `<button onclick="kyDeleteHistoryItem(${JSON.stringify(o.id||'')})" style="background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:5px;padding:3px 8px;font-size:.68rem;cursor:pointer">🗑 삭제</button>` : ''}
+          ${isSuper ? `<button onclick="kyDeleteHistoryItem(${jsAttr(o.id||'')})" style="background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:5px;padding:3px 8px;font-size:.68rem;cursor:pointer">🗑 삭제</button>` : ''}
         </div>
         ${o.statusNote ? `<div style="font-size:.72rem;color:var(--text2);background:var(--surface2,#f8f9fc);border-radius:5px;padding:5px 8px;margin-top:6px">📝 ${escapeHtml(o.statusNote)}${o.processedBy?` (${escapeHtml(o.processedBy)})`:''}</div>` : ''}
       </div>`;
@@ -9943,11 +9943,11 @@ function kyRenderOrders(list){
       ${o.statusNote?`<div style="font-size:.78rem;color:var(--text2,#666);background:var(--surface2,#f8f9fc);border-radius:6px;padding:7px 10px;margin-bottom:10px;border-left:3px solid var(--yellow,#eab308)">📝 관리자메모: ${escapeHtml(o.statusNote)}${o.processedBy?` (${escapeHtml(o.processedBy)})`:''}</div>`:''}
       <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding-top:10px;border-top:1px solid var(--border,#e5e7eb)">
         ${(o.status==='pending'||o.status==='accepted')?`
-          <button class="btn btn-primary" style="padding:8px 18px;font-size:.88rem;background:#2563eb;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer" onclick="kyOpenAction(${JSON.stringify(o.id||'')},'shipped')">🚚 출고</button>
+          <button class="btn btn-primary" style="padding:8px 18px;font-size:.88rem;background:#2563eb;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer" onclick="kyOpenAction(${jsAttr(o.id||'')},'shipped')">🚚 출고</button>
         `:''}
         ${o.status==='shipped'?`<span style="font-size:.78rem;color:#16a34a;font-weight:700">✅ 출고완료</span>`:''}
         <span style="margin-left:auto;font-family:monospace;font-size:.9rem;font-weight:800;color:var(--yellow,#b45309)">${fmt(o.total)}원</span>
-        ${isSuperAdmin() ? `<button onclick="kyDeleteOrder(${JSON.stringify(o.id||'')})" style="margin-left:8px;background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:6px;padding:4px 10px;font-size:.72rem;cursor:pointer">🗑 삭제</button>` : ''}
+        ${isSuperAdmin() ? `<button onclick="kyDeleteOrder(${jsAttr(o.id||'')})" style="margin-left:8px;background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:6px;padding:4px 10px;font-size:.72rem;cursor:pointer">🗑 삭제</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -10066,7 +10066,7 @@ function kyOpenAction(orderId, targetStatus){
     <textarea id="kyActionNote" placeholder="대리점에 전달할 메모 (선택)..." style="width:100%;background:var(--gray-light);border:1.5px solid var(--border);border-radius:6px;padding:10px;font-family:inherit;font-size:.85rem;min-height:70px;resize:vertical;outline:none;margin-bottom:8px">${escapeHtml(o.statusNote||'')}</textarea>
     <div style="display:flex;gap:8px">
       <button class="btn btn-ghost" style="flex:1" onclick="kyCloseDetail()">취소</button>
-      <button class="btn btn-primary" style="flex:2;background:${colors[targetStatus]||'var(--blue)'};border-color:${colors[targetStatus]||'var(--blue)'}" onclick="kyConfirmAction(${JSON.stringify(orderId||'')},${JSON.stringify(targetStatus||'')})">확인</button>
+      <button class="btn btn-primary" style="flex:2;background:${colors[targetStatus]||'var(--blue)'};border-color:${colors[targetStatus]||'var(--blue)'}" onclick="kyConfirmAction(${jsAttr(orderId||'')},${jsAttr(targetStatus||'')})">확인</button>
     </div>`;
   const modal = document.getElementById('kyDetailModal');
   modal.style.display = 'flex';
@@ -11937,7 +11937,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260505-v27')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260505-v28')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
@@ -13101,6 +13101,12 @@ function escapeHtml(s){
   return String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ★ Fix: onclick 같은 큰따옴표로 감싼 HTML 속성 안에 JS 리터럴을 안전하게 삽입
+// JSON.stringify 결과의 " 를 &quot;로 변환해야 onclick="..." 가 깨지지 않음
+function jsAttr(v){
+  return JSON.stringify(v == null ? '' : v).replace(/"/g,'&quot;');
 }
 
 </script>
