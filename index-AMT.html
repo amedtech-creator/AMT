@@ -225,32 +225,40 @@ window.doLogin = async () => {
   btn.disabled = true;
   showMsg('loginMsg','🔐 인증 중...','');
 
-  const res = await verifyAndSignIn(email, pw);
-  if(!res.ok){
+  // ★ Fix: sendOtp/finalizeLogin 후에도 OTP 화면에서 페이지 새로고침 등 비정상 종료 시
+  // 다음 로그인 시도에 대비해 항상 버튼 상태 복원 (try/finally)
+  let _movedToOtp = false;
+  try {
+    const res = await verifyAndSignIn(email, pw);
+    if(!res.ok){
+      let msg = '❌ 코드번호가 틀립니다';
+      if(res.reason==='not_admin_email') msg = '❌ 등록된 관리자 이메일이 아닙니다';
+      if(res.reason==='db_error') msg = '❌ 서버 오류: '+(res.message||'');
+      if(res.reason==='no_codes') msg = '❌ 관리자 코드 미설정';
+      if(res.reason==='auth_legacy') msg = '⚠️ Firebase Auth 재설정 필요 - Console에서 옛 계정 삭제하세요';
+      if(res.reason==='auth_signin_error') msg = '❌ '+(res.message||'인증 실패');
+      if(res.reason==='auth_create_error') msg = '❌ 계정 생성 실패: '+(res.message||'');
+      showMsg('loginMsg', msg, 'error');
+      return;
+    }
+
+    _pendingEmail = email.toLowerCase();
+    _pendingCode = pw;
+    _pendingName = res.name;
+    _pendingRole = res.role;
+
+    const deviceOk = localStorage.getItem('amt_device_verified_'+btoa(_pendingEmail).replace(/=/g,'')) === '1';
+    if(deviceOk){
+      await finalizeLogin(false);
+      return;
+    }
+    _movedToOtp = true;
+    await sendOtp(_pendingEmail);
+  } finally {
+    // OTP로 이동했더라도 버튼 상태는 복원 (사용자가 뒤로가기 시 정상 동작)
     btn.classList.remove('loading');
     btn.disabled = false;
-    let msg = '❌ 코드번호가 틀립니다';
-    if(res.reason==='not_admin_email') msg = '❌ 등록된 관리자 이메일이 아닙니다';
-    if(res.reason==='db_error') msg = '❌ 서버 오류: '+(res.message||'');
-    if(res.reason==='no_codes') msg = '❌ 관리자 코드 미설정';
-    if(res.reason==='auth_legacy') msg = '⚠️ Firebase Auth 재설정 필요 - Console에서 옛 계정 삭제하세요';
-    if(res.reason==='auth_signin_error') msg = '❌ '+(res.message||'인증 실패');
-    if(res.reason==='auth_create_error') msg = '❌ 계정 생성 실패: '+(res.message||'');
-    showMsg('loginMsg', msg, 'error');
-    return;
   }
-
-  _pendingEmail = email.toLowerCase();
-  _pendingCode = pw;
-  _pendingName = res.name;
-  _pendingRole = res.role;
-
-  const deviceOk = localStorage.getItem('amt_device_verified_'+btoa(_pendingEmail).replace(/=/g,'')) === '1';
-  if(deviceOk){
-    await finalizeLogin(false);
-    return;
-  }
-  await sendOtp(_pendingEmail);
 };
 
 async function finalizeLogin(fromOtp){

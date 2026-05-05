@@ -3812,7 +3812,7 @@ function statusBadge(o){
 
 function prodBadge(p){
   const cls={'JUC':'badge-juc','MEDIAS':'badge-medias','DELL':'badge-dell'};
-  return `<span class="badge ${cls[p]||'badge-gray'}">${p}</span>`;
+  return `<span class="badge ${cls[p]||'badge-gray'}">${escapeHtml(p||'')}</span>`;
 }
 
 function renderOrderTableHtml(list, compact=false){
@@ -3829,8 +3829,8 @@ function renderOrderTableHtml(list, compact=false){
       const t=today();
       const isOverdue=o.status!=='done'&&o.dueDate<t;
       return `<tr>
-        <td class="td-mono">${o.orderDate}</td>
-        <td style="font-size:.78rem;max-width:140px">${o.dealerName}</td>
+        <td class="td-mono">${escapeHtml(o.orderDate||'')}</td>
+        <td style="font-size:.78rem;max-width:140px">${escapeHtml(o.dealerName||'')}</td>
         <td>${prodBadge(o.product)}</td>
         <td class="td-mono td-r">${fmt(o.qty)}</td>
         ${!compact?`<td class="td-mono td-r">${fmt(o.price)}</td>`:''}
@@ -3838,12 +3838,12 @@ function renderOrderTableHtml(list, compact=false){
           ${fmt(o.total)}
           ${o.fee?`<br><span style="font-size:.67rem;color:var(--text3)">+택${fmt(o.fee)}</span>`:''}
         </td>
-        <td class="td-mono" style="color:${isOverdue?'var(--red)':''};font-weight:${isOverdue?700:400}">${o.dueDate}</td>
+        <td class="td-mono" style="color:${isOverdue?'var(--red)':''};font-weight:${isOverdue?700:400}">${escapeHtml(o.dueDate||'')}</td>
         <td>${statusBadge(o)}</td>
         ${!compact?`<td class="td-c">
           <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
-            <button class="btn btn-outline btn-xs" onclick="openEditOrder('${o.id}')">✏️ 수정</button>
-            <button class="btn btn-danger btn-xs" onclick="delOrder('${o.id}')">✕</button>
+            <button class="btn btn-outline btn-xs" onclick="openEditOrder(${JSON.stringify(o.id||'')})">✏️ 수정</button>
+            <button class="btn btn-danger btn-xs" onclick="delOrder(${JSON.stringify(o.id||'')})">✕</button>
           </div>
         </td>`:''}
       </tr>`;
@@ -3892,24 +3892,24 @@ function showMarkDoneModal(id){
       <div style="font-size:1rem;font-weight:700;margin-bottom:14px">수금 처리</div>
       <div style="font-size:.85rem;background:#f8fafc;border-radius:8px;padding:12px;margin-bottom:16px;line-height:2">
         <span style="color:#888;font-size:.75rem">대리점</span><br>
-        <b style="font-size:.95rem">${o.dealerName}</b><br>
+        <b style="font-size:.95rem">${escapeHtml(o.dealerName||'')}</b><br>
         <span style="color:#888;font-size:.75rem">제품 / 금액</span><br>
-        ${o.product} ${fmt(o.qty)}개 &nbsp; <b>${fmt(o.total+(o.fee||0))}원</b><br>
+        ${escapeHtml(o.product||'')} ${fmt(o.qty)}개 &nbsp; <b>${fmt(o.total+(o.fee||0))}원</b><br>
         <span style="color:#888;font-size:.75rem">수금 예정일</span><br>
-        <b style="color:#2563eb">${o.dueDate}</b>
+        <b style="color:#2563eb">${escapeHtml(o.dueDate||'')}</b>
         ${o.dueDate < today() ? ' <span style="color:#dc2626;font-size:.75rem">[연체]</span>' : ''}
       </div>
       <div style="margin-bottom:16px">
         <label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:4px">실제 수금일</label>
         <div style="font-size:.75rem;color:#888;margin-bottom:6px">
-          예정일: <b>${o.dueDate}</b> &nbsp;/&nbsp; 오늘: <b>${today()}</b>
+          예정일: <b>${escapeHtml(o.dueDate||'')}</b> &nbsp;/&nbsp; 오늘: <b>${today()}</b>
         </div>
         <input type="date" id="markDoneDate" value="${today()}"
           style="width:100%;padding:9px 10px;border:2px solid #2563eb;border-radius:8px;font-size:.95rem;font-weight:600;color:#1e3a5f;box-sizing:border-box">
         <div style="display:flex;gap:6px;margin-top:6px">
-          <button type="button" onclick="document.getElementById('markDoneDate').value='${o.dueDate}'"
+          <button type="button" onclick="document.getElementById('markDoneDate').value=${JSON.stringify(o.dueDate||'')}"
             style="flex:1;padding:6px 4px;border-radius:6px;border:1px solid #d1d5db;background:#f1f5f9;font-size:.75rem;cursor:pointer">
-            예정일로 (${o.dueDate})
+            예정일로 (${escapeHtml(o.dueDate||'')})
           </button>
           <button type="button" onclick="document.getElementById('markDoneDate').value='${today()}'"
             style="flex:1;padding:6px 4px;border-radius:6px;border:1px solid #d1d5db;background:#f1f5f9;font-size:.75rem;cursor:pointer">
@@ -4231,15 +4231,15 @@ function showDayDetail(ds){
             ? `<span style="font-weight:700">${fmt(rowTotal)}</span> <span style="color:var(--blue);font-weight:700;font-size:.85rem">(총 ${fmt(dealerSum[k])})</span>`
             : `<span style="font-weight:700">${fmt(rowTotal)}</span>`;
           return `<tr>
-            <td style="font-size:.78rem">${o.dealerName}</td>
+            <td style="font-size:.78rem">${escapeHtml(o.dealerName||'')}</td>
             <td>${prodBadge(o.product)}</td>
             <td class="td-mono td-r">${fmt(o.qty)}</td>
             <td class="td-mono td-r">${fmt(o.total)}</td>
             <td class="td-mono td-r">${o.fee?fmt(o.fee):'-'}</td>
             <td class="td-mono td-r">${totalCell}</td>
             <td>${statusBadge(o)}</td>
-            <td>${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone('${o.id}')">✓ 수금</button>`:
-              `<button class="btn btn-ghost btn-xs" onclick="cancelDone('${o.id}')">취소</button>`}</td>
+            <td>${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone(${JSON.stringify(o.id||'')})">✓ 수금</button>`:
+              `<button class="btn btn-ghost btn-xs" onclick="cancelDone(${JSON.stringify(o.id||'')})">취소</button>`}</td>
           </tr>`;
         }).join('');
       })()}
@@ -4348,17 +4348,17 @@ function renderRecList(){
               ? `<span style="font-weight:700">${fmt(rowTotal)}</span> <span style="color:var(--blue);font-weight:700;font-size:.85rem">(총 ${fmt(dealerSum[k])})</span>`
               : `<span style="font-weight:700">${fmt(rowTotal)}</span>`;
             return `<tr>
-              <td style="font-size:.78rem">${o.dealerName}</td>
+              <td style="font-size:.78rem">${escapeHtml(o.dealerName||'')}</td>
               <td>${prodBadge(o.product)}</td>
-              <td class="td-mono">${o.orderDate}</td>
+              <td class="td-mono">${escapeHtml(o.orderDate||'')}</td>
               <td class="td-mono td-r">${fmt(o.qty)}</td>
               <td class="td-mono td-r">${fmt(o.total)}</td>
               <td class="td-mono td-r">${o.fee?fmt(o.fee):'-'}</td>
               <td class="td-mono td-r">${totalCell}</td>
               <td>${statusBadge(o)}</td>
               <td><div style="display:flex;gap:4px">
-                ${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone('${o.id}')">✓ 수금</button>`
-                  :`<button class="btn btn-ghost btn-xs" onclick="cancelDone('${o.id}')">취소</button>`}
+                ${o.status!=='done'?`<button class="btn btn-xs" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="markDone(${JSON.stringify(o.id||'')})">✓ 수금</button>`
+                  :`<button class="btn btn-ghost btn-xs" onclick="cancelDone(${JSON.stringify(o.id||'')})">취소</button>`}
               </div></td>
             </tr>`;
           }).join('');
@@ -4541,15 +4541,15 @@ function renderInvHistory(){
       const autoReason = i.relOrder ? '발주' : i.relInternal ? '내부거래' : i.relKyOrder ? 'KY주문' : '';
       const actionCell = isAuto
         ? `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:6px;font-size:.68rem;font-weight:600" title="${autoReason}에서 자동 생성됨 - 원천에서 수정/삭제하세요">🔒 ${autoReason}</span>`
-        : `<button class="btn btn-outline btn-xs" onclick="openEditInvLog('${i.id}')" style="padding:3px 7px;margin-right:3px" title="수정">✏️</button>
-           <button class="btn btn-danger btn-xs" onclick="deleteInvLog('${i.id}')" style="padding:3px 7px" title="삭제">🗑</button>`;
+        : `<button class="btn btn-outline btn-xs" onclick="openEditInvLog(${JSON.stringify(i.id||'')})" style="padding:3px 7px;margin-right:3px" title="수정">✏️</button>
+           <button class="btn btn-danger btn-xs" onclick="deleteInvLog(${JSON.stringify(i.id||'')})" style="padding:3px 7px" title="삭제">🗑</button>`;
       return `<tr>
-        <td class="td-mono">${i.date}</td>
+        <td class="td-mono">${escapeHtml(i.date||'')}</td>
         <td><span class="${co==='AMT'?'company-badge-amt':'company-badge-ky'}">${co}</span></td>
-        <td><span class="badge" style="background:${c}20;color:${c}">${i.product}</span></td>
+        <td><span class="badge" style="background:${c}20;color:${c}">${escapeHtml(i.product||'')}</span></td>
         <td style="color:${tc};font-weight:600;font-size:.75rem">${typeLabel}</td>
         <td class="td-mono td-r" style="color:${i.qty<0?'var(--red)':'var(--green)'};font-weight:700">${i.qty>0?'+':''}${fmt(i.qty)}</td>
-        <td style="font-size:.75rem;color:var(--text2)">${i.memo||''}</td>
+        <td style="font-size:.75rem;color:var(--text2)">${escapeHtml(i.memo||'')}</td>
         <td style="text-align:center">${actionCell}</td>
       </tr>`;
     }).join('')}
@@ -5079,7 +5079,7 @@ async function issueTaxInvoice(){
     console.error('[바로빌] 호출 실패:', e);
     statusEl.style.background = '#fef2f2';
     statusEl.style.color = '#991b1b';
-    statusEl.innerHTML = `❌ <b>통신 오류</b><br>${e.message}<br>
+    statusEl.innerHTML = `❌ <b>통신 오류</b><br>${escapeHtml(e.message)}<br>
       <span style="font-size:.7rem">※ GAS URL이 올바른지 확인하세요</span>`;
     btn.disabled = false;
     btn.textContent = '🔄 다시 시도';
@@ -5154,17 +5154,17 @@ function renderInternalList(){
         const dirColor = isReturn ? 'var(--red)' : 'var(--internal)';
         const tagHtml = isReturn ? '<span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:8px;font-size:.65rem;font-weight:700;margin-right:4px">반품</span>' : '';
         return `<tr style="${rowStyle}">
-          <td class="td-mono">${t.date}</td>
+          <td class="td-mono">${escapeHtml(t.date||'')}</td>
           <td>
             ${tagHtml}<span class="company-badge-amt">AMT</span>
             <span style="margin:0 4px;color:${dirColor};font-weight:700">${dirArrow}</span>
             <span class="company-badge-ky">KY</span>
           </td>
-          <td><span class="badge" style="background:${c}20;color:${c}">${t.product}</span></td>
+          <td><span class="badge" style="background:${c}20;color:${c}">${escapeHtml(t.product||'')}</span></td>
           <td class="td-mono td-r"${isReturn?' style="color:#dc2626;font-weight:700"':''}>${fmt(t.qty)}</td>
           <td class="td-mono td-r">${fmt(t.price)}</td>
           <td class="td-mono td-r" style="font-weight:700;color:${isReturn?'#dc2626':'var(--internal)'}">${fmt(t.total)}</td>
-          <td style="font-size:.75rem;color:var(--text2)">${t.memo||''}</td>
+          <td style="font-size:.75rem;color:var(--text2)">${escapeHtml(t.memo||'')}</td>
         </tr>`;
       }).join('')}
       </tbody>
@@ -5267,7 +5267,7 @@ function renderAdjHistory(){
           ? new Date(t.createdAt).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
           : '-';
         return `<tr>
-          <td class="td-mono" style="white-space:nowrap">${t.date}</td>
+          <td class="td-mono" style="white-space:nowrap">${escapeHtml(t.date||'')}</td>
           <td>
             <span style="background:${pc.bg};color:${pc.color};padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700;white-space:nowrap">
               ${pc.label}
@@ -5276,11 +5276,11 @@ function renderAdjHistory(){
           <td class="td-mono td-r" style="color:${amtColor};font-weight:700;white-space:nowrap">
             ${amtSign}${fmt(Math.abs(adjAmt))}원
           </td>
-          <td style="font-size:.75rem;color:var(--text2);max-width:120px;overflow:hidden;text-overflow:ellipsis">${t.memo||''}</td>
+          <td style="font-size:.75rem;color:var(--text2);max-width:120px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.memo||'')}</td>
           <td class="td-mono" style="font-size:.72rem;color:var(--text3);white-space:nowrap">${createdAt}</td>
           <td class="td-c" style="white-space:nowrap">
-            <button class="btn btn-outline btn-xs" onclick="editAdjEntry('${t.id}')" style="margin-right:4px">✏️</button>
-            <button class="btn btn-danger btn-xs" onclick="deleteAdjEntry('${t.id}')">✕</button>
+            <button class="btn btn-outline btn-xs" onclick="editAdjEntry(${JSON.stringify(t.id||'')})" style="margin-right:4px">✏️</button>
+            <button class="btn btn-danger btn-xs" onclick="deleteAdjEntry(${JSON.stringify(t.id||'')})">✕</button>
           </td>
         </tr>`;
       }).join('')}
@@ -5711,15 +5711,15 @@ function renderTxList(){
         const isAdj=t.type.startsWith('adj_');
         const amtDisplay=isAdj?(t.adjAmt!==undefined?fmt(Math.abs(t.adjAmt))+'원(조정)':'-'):fmt(t.amount||0)+'원';
         return `<tr>
-          <td class="td-mono" style="font-size:.8rem;white-space:nowrap">${t.date}</td>
+          <td class="td-mono" style="font-size:.8rem;white-space:nowrap">${escapeHtml(t.date||'')}</td>
           <td style="font-size:.75rem">
             <div>${txTypeLabel(t.type)}</div>
             <div style="margin-top:2px">${txDirectionBadge(t.type)}</div>
           </td>
           <td class="td-mono td-r" style="color:var(--blue);font-weight:700;white-space:nowrap">${amtDisplay}</td>
-          <td style="font-size:.73rem;color:var(--text2);max-width:80px;overflow:hidden;text-overflow:ellipsis">${t.memo||''}</td>
-          <td class="td-c"><button class="btn btn-outline btn-xs" onclick="openEditTx('${t.id}')">✏️</button></td>
-          <td class="td-c"><button class="btn btn-danger btn-xs" onclick="deleteTx('${t.id}')">✕</button></td>
+          <td style="font-size:.73rem;color:var(--text2);max-width:80px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.memo||'')}</td>
+          <td class="td-c"><button class="btn btn-outline btn-xs" onclick="openEditTx(${JSON.stringify(t.id||'')})">✏️</button></td>
+          <td class="td-c"><button class="btn btn-danger btn-xs" onclick="deleteTx(${JSON.stringify(t.id||'')})">✕</button></td>
         </tr>`;
       }).join('')}
       </tbody>
@@ -6032,16 +6032,16 @@ function renderBestReturnList(){
         const lbl=ftLabel[ft]||ft||'-';
         const col=ftColor[ft]||'var(--best)';
         return `<tr>
-          <td class="td-mono">${r.date}</td>
+          <td class="td-mono">${escapeHtml(r.date||'')}</td>
           <td><span style="background:${col}20;color:${col};padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700">${lbl}</span></td>
-          <td style="font-size:.8rem">${r.product}</td>
+          <td style="font-size:.8rem">${escapeHtml(r.product||'')}</td>
           <td class="td-mono td-r">${fmt(r.price)}</td>
           <td class="td-mono td-r">${fmt(r.qty)}</td>
           <td class="td-mono td-r tx-in">${fmt(r.total)}원</td>
-          <td style="font-size:.75rem;color:var(--text2)">${r.memo||''}</td>
+          <td style="font-size:.75rem;color:var(--text2)">${escapeHtml(r.memo||'')}</td>
           <td class="td-c" style="white-space:nowrap">
-            <button class="btn btn-outline btn-xs" onclick="openEditReturn('${r.id}')" style="margin-bottom:2px">✏️</button>
-            <button class="btn btn-danger btn-xs" onclick="deleteBestReturn('${r.id}')">✕</button>
+            <button class="btn btn-outline btn-xs" onclick="openEditReturn(${JSON.stringify(r.id||'')})" style="margin-bottom:2px">✏️</button>
+            <button class="btn btn-danger btn-xs" onclick="deleteBestReturn(${JSON.stringify(r.id||'')})">✕</button>
           </td>
         </tr>`;
       }).join('')}
@@ -6174,18 +6174,18 @@ function renderDealerCards(){
     return `
     <div class="dealer-card">
       <div class="dealer-card-header">
-        <div class="dealer-name">${d.name}</div>
+        <div class="dealer-name">${escapeHtml(d.name)}</div>
         <div class="dealer-actions">
-          <button class="btn btn-outline btn-xs" onclick="openDealerModal('${d.id}')" style="padding:5px 12px">✏️ 수정</button>
-          <button class="btn btn-danger btn-xs" onclick="deleteDealer('${d.id}')" style="padding:5px 12px;margin-left:8px">🗑️ 삭제</button>
+          <button class="btn btn-outline btn-xs" onclick="openDealerModal(${JSON.stringify(d.id||'')})" style="padding:5px 12px">✏️ 수정</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteDealer(${JSON.stringify(d.id||'')})" style="padding:5px 12px;margin-left:8px">🗑️ 삭제</button>
         </div>
       </div>
-      <div class="dealer-products">${d.products.map(p=>`<span class="badge" style="background:${pColors[p.product]||'var(--gray)'}20;color:${pColors[p.product]||'var(--gray)'}">${p.product} ${fmt(p.price)}원</span>`).join('')}</div>
+      <div class="dealer-products">${d.products.map(p=>`<span class="badge" style="background:${pColors[p.product]||'var(--gray)'}20;color:${pColors[p.product]||'var(--gray)'}">${escapeHtml(p.product)} ${fmt(p.price)}원</span>`).join('')}</div>
       <div class="dealer-info">
         <span>💳 ${termDisplay(d.term)}</span>
         ${d.fee>0?`<span>📦 택배비 ${fmt(d.fee)}원</span>`:''}
         ${emailHtml}
-        ${d.note?`<span>📝 ${d.note}</span>`:''}
+        ${d.note?`<span>📝 ${escapeHtml(d.note)}</span>`:''}
       </div>
     </div>
   `;}).join('')}</div>`;
@@ -8614,7 +8614,7 @@ async function saveCorpTaxCosts(){
     }
     toast('✅ 저장 완료','success');
   } catch(e){
-    if(msg) msg.innerHTML = `<span style="color:#dc2626;font-weight:600">❌ 저장 실패: ${e.message}</span>`;
+    if(msg) msg.innerHTML = `<span style="color:#dc2626;font-weight:600">❌ 저장 실패: ${escapeHtml(e.message)}</span>`;
     toast('저장 실패: '+e.message,'error');
   }
 }
@@ -9318,12 +9318,12 @@ function renderInvCheck(){
         const coColor2 = co2==='AMT'?'var(--amt)':'var(--ky)';
         const coBg2 = co2==='AMT'?'var(--amt-bg)':'var(--ky-bg)';
         return `<tr>
-          <td class="td-mono" style="white-space:nowrap">${i.date}</td>
+          <td class="td-mono" style="white-space:nowrap">${escapeHtml(i.date||'')}</td>
           <td><span style="background:${coBg2};color:${coColor2};padding:1px 6px;border-radius:8px;font-size:.68rem;font-weight:700">${co2}</span></td>
-          <td><span style="background:${pc2}20;color:${pc2};padding:1px 6px;border-radius:8px;font-size:.72rem;font-weight:700">${i.product}</span></td>
+          <td><span style="background:${pc2}20;color:${pc2};padding:1px 6px;border-radius:8px;font-size:.72rem;font-weight:700">${escapeHtml(i.product||'')}</span></td>
           <td style="color:${tc};font-weight:600;font-size:.75rem">${i.type==='in'?'입고':i.type==='out'?'출고':'조정'}</td>
           <td class="td-mono" style="text-align:right;font-weight:700;color:${i.qty<0?'#dc2626':'#059669'}">${i.qty>0?'+':''}${fmt(i.qty)}</td>
-          <td style="font-size:.72rem;color:#888">${i.memo||''}</td>
+          <td style="font-size:.72rem;color:#888">${escapeHtml(i.memo||'')}</td>
         </tr>`;
       }).join('')}
       </tbody>
@@ -9460,27 +9460,27 @@ async function kyRenderHistory(){
       const statusLabel = o.status === 'shipped' ? '출고완료' : (o.status === 'received' ? '반품입고' : o.status);
       const statusBg = o.status === 'shipped' ? '#eff6ff' : '#f0fdf4';
       const statusColor = o.status === 'shipped' ? '#2563eb' : '#16a34a';
-      const items = (o.items||[]).map(i => `${i.product} ${fmt(i.qty)}개`).join(', ');
+      const items = (o.items||[]).map(i => `${escapeHtml(i.product)} ${fmt(i.qty)}개`).join(', ');
       const shippedAt = o.statusUpdatedAt ? new Date(o.statusUpdatedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
       const isSuper = isSuperAdmin();
       return `<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
           <div>
-            <span style="font-weight:700;font-size:.88rem">${o.dealerName||'-'}</span>
+            <span style="font-weight:700;font-size:.88rem">${escapeHtml(o.dealerName||'-')}</span>
             <span style="margin-left:8px;background:${statusBg};color:${statusColor};padding:2px 8px;border-radius:10px;font-size:.65rem;font-weight:700">${statusLabel}</span>
           </div>
           <div style="font-family:monospace;font-size:.85rem;font-weight:800;color:var(--yellow)">${fmt(o.total||0)}원</div>
         </div>
         <div style="font-size:.8rem;color:var(--text2);margin-bottom:4px">${items}</div>
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:.7rem;color:var(--text3);font-family:monospace">
-          <span>주문 ${o.orderDate||''} · 처리 ${shippedAt}</span>
-          ${isSuper ? `<button onclick="kyDeleteHistoryItem('${o.id}')" style="background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:5px;padding:3px 8px;font-size:.68rem;cursor:pointer">🗑 삭제</button>` : ''}
+          <span>주문 ${escapeHtml(o.orderDate||'')} · 처리 ${shippedAt}</span>
+          ${isSuper ? `<button onclick="kyDeleteHistoryItem(${JSON.stringify(o.id||'')})" style="background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:5px;padding:3px 8px;font-size:.68rem;cursor:pointer">🗑 삭제</button>` : ''}
         </div>
-        ${o.statusNote ? `<div style="font-size:.72rem;color:var(--text2);background:var(--surface2,#f8f9fc);border-radius:5px;padding:5px 8px;margin-top:6px">📝 ${o.statusNote}${o.processedBy?` (${o.processedBy})`:''}</div>` : ''}
+        ${o.statusNote ? `<div style="font-size:.72rem;color:var(--text2);background:var(--surface2,#f8f9fc);border-radius:5px;padding:5px 8px;margin-top:6px">📝 ${escapeHtml(o.statusNote)}${o.processedBy?` (${escapeHtml(o.processedBy)})`:''}</div>` : ''}
       </div>`;
     }).join('');
   }catch(e){
-    el.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:.85rem">❌ 로드 실패: '+e.message+'</div>';
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:.85rem">❌ 로드 실패: '+escapeHtml(e.message)+'</div>';
   }
 }
 
@@ -9544,7 +9544,7 @@ function showKyNewOrderPopup(order){
     'animation:toastIn .22s ease'
   ].join(';');
 
-  const itemsText = (order.items||[]).map(i => i.product+' '+fmt(i.qty)+'개').join(' · ');
+  const itemsText = (order.items||[]).map(i => escapeHtml(i.product)+' '+fmt(i.qty)+'개').join(' · ');
   const typeTag = order.orderType && order.orderType !== 'order'
     ? `<span style="margin-left:6px;font-size:.68rem;padding:3px 9px;border-radius:999px;font-weight:800;background:${order.orderType==='return'?'#fef3c7':'#dbeafe'};color:${order.orderType==='return'?'#92400e':'#1e3a8a'}">${order.orderType==='return'?'반품':'교환'}</span>` : '';
   const now = new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
@@ -9559,7 +9559,7 @@ function showKyNewOrderPopup(order){
         </div>
       </div>
       <div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:14px;padding:14px 16px">
-        <div style="font-size:1rem;font-weight:900;margin-bottom:6px;color:#fff">${order.dealerName}${typeTag}</div>
+        <div style="font-size:1rem;font-weight:900;margin-bottom:6px;color:#fff">${escapeHtml(order.dealerName||'')}${typeTag}</div>
         <div style="font-size:.9rem;line-height:1.6;font-weight:800;color:#eff6ff;margin-bottom:10px">${itemsText}</div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
           <span style="font-family:monospace;font-size:1.15rem;font-weight:900;color:#fff">${fmt(order.total)}원</span>
@@ -9927,27 +9927,27 @@ function kyRenderOrders(list){
     const sb = statusBg[o.status]||'#f3f4f6';
     const label = statusLabels[o.status]||o.status;
     const chips = (o.items||[]).map(i=>
-      `<span style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:4px 10px;font-size:.75rem;font-weight:700;color:#b45309">📦 ${i.product} ${fmt(i.qty)}개 · ${fmt(i.total)}원</span>`
+      `<span style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:4px 10px;font-size:.75rem;font-weight:700;color:#b45309">📦 ${escapeHtml(i.product)} ${fmt(i.qty)}개 · ${fmt(i.total)}원</span>`
     ).join('');
     const ct = o.createdAt ? new Date(o.createdAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     return `<div style="background:#fff;border:${isNew?'1.5px solid var(--yellow,#eab308)':'1px solid var(--border,#e5e7eb)'};${isNew?'border-left:4px solid var(--yellow,#eab308)':''};border-radius:10px;padding:16px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div>
-          <div style="font-size:.95rem;font-weight:700">${o.dealerName||'-'}${isNew?'<span style="margin-left:8px;background:#ef4444;color:#fff;padding:2px 6px;border-radius:8px;font-size:.58rem">NEW</span>':''}</div>
-          <div style="font-size:.7rem;color:var(--text3,#888);font-family:monospace;margin-top:2px">${o.id||''} · ${o.orderDate||''} ${ct}</div>
+          <div style="font-size:.95rem;font-weight:700">${escapeHtml(o.dealerName||'-')}${isNew?'<span style="margin-left:8px;background:#ef4444;color:#fff;padding:2px 6px;border-radius:8px;font-size:.58rem">NEW</span>':''}</div>
+          <div style="font-size:.7rem;color:var(--text3,#888);font-family:monospace;margin-top:2px">${escapeHtml(o.id||'')} · ${escapeHtml(o.orderDate||'')} ${ct}</div>
         </div>
         <span style="background:${sb};color:${sc};padding:3px 10px;border-radius:20px;font-size:.68rem;font-weight:700">${label}</span>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${chips}</div>
-      ${o.memo?`<div style="font-size:.78rem;color:var(--text2,#666);background:var(--surface2,#f8f9fc);border-radius:6px;padding:7px 10px;margin-bottom:10px;border-left:3px solid #fde68a">💬 ${o.memo}</div>`:''}
-      ${o.statusNote?`<div style="font-size:.78rem;color:var(--text2,#666);background:var(--surface2,#f8f9fc);border-radius:6px;padding:7px 10px;margin-bottom:10px;border-left:3px solid var(--yellow,#eab308)">📝 관리자메모: ${o.statusNote}${o.processedBy?` (${o.processedBy})`:''}</div>`:''}
+      ${o.memo?`<div style="font-size:.78rem;color:var(--text2,#666);background:var(--surface2,#f8f9fc);border-radius:6px;padding:7px 10px;margin-bottom:10px;border-left:3px solid #fde68a">💬 ${escapeHtml(o.memo)}</div>`:''}
+      ${o.statusNote?`<div style="font-size:.78rem;color:var(--text2,#666);background:var(--surface2,#f8f9fc);border-radius:6px;padding:7px 10px;margin-bottom:10px;border-left:3px solid var(--yellow,#eab308)">📝 관리자메모: ${escapeHtml(o.statusNote)}${o.processedBy?` (${escapeHtml(o.processedBy)})`:''}</div>`:''}
       <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding-top:10px;border-top:1px solid var(--border,#e5e7eb)">
         ${(o.status==='pending'||o.status==='accepted')?`
-          <button class="btn btn-primary" style="padding:8px 18px;font-size:.88rem;background:#2563eb;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer" onclick="kyOpenAction('${o.id}','shipped')">🚚 출고</button>
+          <button class="btn btn-primary" style="padding:8px 18px;font-size:.88rem;background:#2563eb;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer" onclick="kyOpenAction(${JSON.stringify(o.id||'')},'shipped')">🚚 출고</button>
         `:''}
         ${o.status==='shipped'?`<span style="font-size:.78rem;color:#16a34a;font-weight:700">✅ 출고완료</span>`:''}
         <span style="margin-left:auto;font-family:monospace;font-size:.9rem;font-weight:800;color:var(--yellow,#b45309)">${fmt(o.total)}원</span>
-        ${isSuperAdmin() ? `<button onclick="kyDeleteOrder('${o.id}')" style="margin-left:8px;background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:6px;padding:4px 10px;font-size:.72rem;cursor:pointer">🗑 삭제</button>` : ''}
+        ${isSuperAdmin() ? `<button onclick="kyDeleteOrder(${JSON.stringify(o.id||'')})" style="margin-left:8px;background:none;border:1px solid #fca5a5;color:#ef4444;border-radius:6px;padding:4px 10px;font-size:.72rem;cursor:pointer">🗑 삭제</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -10003,7 +10003,7 @@ function kyOpenAction(orderId, targetStatus){
   };
   const colors={accepted:'var(--green)',shipped:'var(--blue)',received:'#16a34a',pending:'var(--gray)'};
 
-  const rows = (o.items||[]).map(i=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.85rem"><span>${i.product}</span><span style="font-weight:700">${fmt(i.qty)}개 · ${fmt(i.total)}원</span></div>`).join('');
+  const rows = (o.items||[]).map(i=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.85rem"><span>${escapeHtml(i.product)}</span><span style="font-weight:700">${fmt(i.qty)}개 · ${fmt(i.total)}원</span></div>`).join('');
 
   // 주문유형별 안내
   let actionNote = '';
@@ -10016,10 +10016,10 @@ function kyOpenAction(orderId, targetStatus){
   }
 
   document.getElementById('kyDetailContent').innerHTML = `
-    <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.85rem"><span>대리점</span><span style="font-weight:700">${o.dealerName}</span></div>
-    <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.85rem"><span>주문일</span><span>${o.orderDate||''}</span></div>
+    <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.85rem"><span>대리점</span><span style="font-weight:700">${escapeHtml(o.dealerName||'')}</span></div>
+    <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.85rem"><span>주문일</span><span>${escapeHtml(o.orderDate||'')}</span></div>
     ${rows}
-    ${o.memo?`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.82rem"><span>메모</span><span>${o.memo}</span></div>`:''}
+    ${o.memo?`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.82rem"><span>메모</span><span>${escapeHtml(o.memo)}</span></div>`:''}
     <div style="display:flex;justify-content:space-between;padding:10px 0 0;font-weight:800;font-size:.88rem"><span>합계</span><span style="color:var(--yellow)">${fmt(o.total)}원</span></div>`;
   // ★ 택배비 선택 UI (shipped 상태이고 해당 대리점에 fee 설정이 있는 경우)
   let feeSelectHtml = '';
@@ -10040,7 +10040,7 @@ function kyOpenAction(orderId, targetStatus){
               <span>🚨 택배비 포함 여부 반드시 확인 <span style="font-size:.85rem;font-weight:600">(택배비포함시 ✔체크해주세요)</span></span>
             </label>
             <div style="font-size:.82rem;color:#991b1b;margin-top:8px;padding-left:34px;font-weight:600">
-              ⚠️ <b>${o.dealerName}</b> 은(는) 택배비 처리에 주의가 필요합니다<br>
+              ⚠️ <b>${escapeHtml(o.dealerName||'')}</b> 은(는) 택배비 처리에 주의가 필요합니다<br>
               <span style="font-weight:500">택배비 ${fmt(dealerFee||(o.fee||0))}원 포함 여부를 정확히 확인하세요.</span>
             </div>
           </div>`;
@@ -10052,7 +10052,7 @@ function kyOpenAction(orderId, targetStatus){
               <span>🚚 택배비 포함 명세서 발송</span>
             </label>
             <div style="font-size:.7rem;color:#78350f;margin-top:4px;padding-left:26px">
-              체크 해제 시 택배비 없는 명세서가 발송됩니다 (대리점 ${o.dealerName}: 택배비 ${fmt(dealerFee||(o.fee||0))}원)
+              체크 해제 시 택배비 없는 명세서가 발송됩니다 (대리점 ${escapeHtml(o.dealerName||'')}: 택배비 ${fmt(dealerFee||(o.fee||0))}원)
             </div>
           </div>`;
       }
@@ -10063,10 +10063,10 @@ function kyOpenAction(orderId, targetStatus){
     <div style="font-weight:700;margin-bottom:8px;color:${colors[targetStatus]||'var(--text)'}">→ ${labels[targetStatus]||targetStatus}</div>
     ${actionNote}
     ${feeSelectHtml}
-    <textarea id="kyActionNote" placeholder="대리점에 전달할 메모 (선택)..." style="width:100%;background:var(--gray-light);border:1.5px solid var(--border);border-radius:6px;padding:10px;font-family:inherit;font-size:.85rem;min-height:70px;resize:vertical;outline:none;margin-bottom:8px">${o.statusNote||''}</textarea>
+    <textarea id="kyActionNote" placeholder="대리점에 전달할 메모 (선택)..." style="width:100%;background:var(--gray-light);border:1.5px solid var(--border);border-radius:6px;padding:10px;font-family:inherit;font-size:.85rem;min-height:70px;resize:vertical;outline:none;margin-bottom:8px">${escapeHtml(o.statusNote||'')}</textarea>
     <div style="display:flex;gap:8px">
       <button class="btn btn-ghost" style="flex:1" onclick="kyCloseDetail()">취소</button>
-      <button class="btn btn-primary" style="flex:2;background:${colors[targetStatus]||'var(--blue)'};border-color:${colors[targetStatus]||'var(--blue)'}" onclick="kyConfirmAction('${orderId}','${targetStatus}')">확인</button>
+      <button class="btn btn-primary" style="flex:2;background:${colors[targetStatus]||'var(--blue)'};border-color:${colors[targetStatus]||'var(--blue)'}" onclick="kyConfirmAction(${JSON.stringify(orderId||'')},${JSON.stringify(targetStatus||'')})">확인</button>
     </div>`;
   const modal = document.getElementById('kyDetailModal');
   modal.style.display = 'flex';
@@ -11937,7 +11937,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260502-v26')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260505-v27')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
@@ -11997,8 +11997,8 @@ function openTaxModal(data) {
     const qtyDisplay = isFee ? '' : (item.qty||0).toLocaleString();
     return `
     <tr>
-      <td style="border:1px solid var(--border);padding:8px;text-align:center">${data.issueDate||''}</td>
-      <td style="border:1px solid var(--border);padding:8px">${item.product||''}</td>
+      <td style="border:1px solid var(--border);padding:8px;text-align:center">${escapeHtml(data.issueDate||'')}</td>
+      <td style="border:1px solid var(--border);padding:8px">${escapeHtml(item.product||'')}</td>
       <td style="border:1px solid var(--border);padding:8px;text-align:center">${qtyDisplay}</td>
       <td style="border:1px solid var(--border);padding:8px;text-align:right"></td>
       <td style="border:1px solid var(--border);padding:8px;text-align:right">${itemSupply.toLocaleString()}</td>
@@ -12021,12 +12021,12 @@ function openTaxModal(data) {
       <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:#f9fafb">
         <div style="font-size:.7rem;color:var(--text3);font-weight:700;margin-bottom:8px">공급받는자</div>
         <div style="font-size:.85rem;line-height:1.6">
-          <div><b>${data.dealerName||''}</b></div>
-          <div style="color:var(--text2)">등록번호: ${data.dealerRegNo||'(미등록)'}</div>
-          <div style="color:var(--text2)">대표자: ${data.dealerCeo||'(미등록)'}</div>
-          <div style="color:var(--text2);font-size:.75rem">${data.dealerAddr||'(미등록)'}</div>
+          <div><b>${escapeHtml(data.dealerName||'')}</b></div>
+          <div style="color:var(--text2)">등록번호: ${escapeHtml(data.dealerRegNo||'(미등록)')}</div>
+          <div style="color:var(--text2)">대표자: ${escapeHtml(data.dealerCeo||'(미등록)')}</div>
+          <div style="color:var(--text2);font-size:.75rem">${escapeHtml(data.dealerAddr||'(미등록)')}</div>
           <div style="color:var(--text2);font-size:.75rem;margin-top:4px">
-            업태: ${data.dealerBizClass||'도매업'} / 종목: ${data.dealerBizType||'의료기기'}
+            업태: ${escapeHtml(data.dealerBizClass||'도매업')} / 종목: ${escapeHtml(data.dealerBizType||'의료기기')}
           </div>
           <div style="color:var(--text2);font-size:.75rem">
             ${data.dealerTel ? '☎ '+data.dealerTel : '<span style="color:#c00">☎ 전화번호 미입력</span>'}
@@ -12394,7 +12394,7 @@ async function issueBarobillFromTaxModal() {
     console.error('[바로빌 KY] 호출 실패:', e);
     statusEl.style.background = '#fef2f2';
     statusEl.style.color = '#991b1b';
-    statusEl.innerHTML = `❌ <b>통신 오류</b><br>${e.message}<br>`
+    statusEl.innerHTML = `❌ <b>통신 오류</b><br>${escapeHtml(e.message)}<br>`
       + `<span style="font-size:.7rem">※ GAS URL이 올바른지 확인하세요</span>`;
     btn.disabled = false;
     btn.textContent = '🔄 다시 시도';
