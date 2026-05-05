@@ -6562,14 +6562,17 @@ async function _doSaveDealer(){
 
   // 발주입력 드롭다운 강제 갱신 — 현재 선택된 대리점·제품 유지하면서 단가 반영
   refreshAll();
-  const curDealer=document.getElementById('oDealer').value;
+  const oDealerEl = document.getElementById('oDealer');
+  const curDealer = oDealerEl ? oDealerEl.value : '';
   if(curDealer){
     oOnDealer();  // 제품 목록 재로드
     // 기존 선택된 제품이 있으면 단가도 재로드
-    const curProd=document.getElementById('oProduct').value;
-    if(curProd){
-      document.getElementById('oProduct').value=curProd;
-      oOnProduct();
+    // ★ Fix: oProduct 요소가 동적 생성/소멸되므로 null 체크 필수 (원본부터 있던 버그)
+    const oProductEl = document.getElementById('oProduct');
+    const curProd = oProductEl ? oProductEl.value : '';
+    if(curProd && oProductEl){
+      oProductEl.value = curProd;
+      if(typeof oOnProduct === 'function') oOnProduct();
     }
   }
 }
@@ -11937,7 +11940,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260505-v28')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260505-v29')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
