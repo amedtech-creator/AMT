@@ -3930,6 +3930,7 @@ function showMarkDoneModal(id){
 }
 
 async function confirmMarkDone(id){
+  if(!_lockSave('confirmMarkDone')) return; // ★더블클릭 방지
   const o=orders.find(x=>x.id===id);
   if(!o) return;
   const dateInput=document.getElementById('markDoneDate');
@@ -4473,6 +4474,7 @@ function renderInvCards(){
 }
 
 async function saveInv(){
+  if(!_lockSave('saveInv')) return; // ★더블클릭 방지
   const date=document.getElementById('invDate').value;
   const prod=document.getElementById('invProd').value;
   const qty=parseInt(document.getElementById('invQty').value)||0;
@@ -5442,7 +5444,19 @@ function kySupplyCalc(){
   setInputFmt(document.getElementById('kySupplyTotal'), qty*price);
 }
 
+// ── 더블클릭/중복저장 방지 가드 (2026-06-04 추가) ──
+// 같은 key의 저장이 진행 중이면 두 번째 호출을 무시한다.
+// delay(ms) 뒤 자동으로 잠금 해제 → 네트워크 오류 등으로 잠긴 채 멈추는 일 방지.
+const _saveLocks = {};
+function _lockSave(key, delay){
+  if(_saveLocks[key]) return false;   // 이미 진행 중 → 차단
+  _saveLocks[key] = true;
+  setTimeout(function(){ _saveLocks[key] = false; }, delay || 2500);
+  return true;                        // 진행 허용
+}
+
 async function saveKySupply(){
+  if(!_lockSave('saveKySupply')) return; // ★더블클릭 방지
   const date = (document.getElementById('kySupplyDate')||{}).value;
   const prod = (document.getElementById('kySupplyProduct')||{}).value;
   const qty = parseInput(document.getElementById('kySupplyQty'));
@@ -5659,6 +5673,7 @@ function renderDebtSummary(){
 
 // 거래 저장
 async function saveTx(){
+  if(!_lockSave('saveTx')) return; // ★더블클릭 방지
   const date=document.getElementById('txDate').value;
   const type=document.getElementById('txType').value;
   const amount=parseInput(document.getElementById('txAmt'));
@@ -5889,6 +5904,7 @@ async function _doSaveTxEdit(editId){
 
 // 채무 조정 저장
 async function saveDebtAdj(compA, compB){
+  if(!_lockSave('saveDebtAdj_'+compA+'_'+compB)) return; // ★더블클릭 방지
   // OTP 확인 후 실행
   const dateEl=document.getElementById(`adjDate_${compA}_${compB}`)||document.getElementById('adjDate_AMT_KY');
   await requireOtp(`채무조정 (${compA}↔${compB})`, async () => { await _doSaveDebtAdj(compA, compB); });
@@ -5922,6 +5938,7 @@ function bestCalcTotal(){
 }
 
 async function saveBestReturn(){
+  if(!_lockSave('saveBestReturn')) return; // ★더블클릭 방지
   const date=document.getElementById('bestDate').value;
   const fromType=document.getElementById('bestFrom').value; // KY_to_AMT | AMT_to_BEST | KY_to_BEST
   const product=document.getElementById('bestProduct').value.trim();
@@ -6441,6 +6458,7 @@ if(window._firebaseHelpers){
 }
 
 async function saveDealer(){
+  if(!_lockSave('saveDealer')) return; // ★더블클릭 방지
   await requireOtp('대리점 저장/수정', async () => { await _doSaveDealer(); });
 }
 async function _doSaveDealer(){
@@ -10669,6 +10687,7 @@ async function deleteAdminCode(email){
 }
 
 async function addAdminCode(){
+  if(!_lockSave('addAdminCode')) return; // ★더블클릭 방지
   if(!isSuperAdmin()){ toast('총괄관리자만 추가 가능','error'); return; }
   const name  = (document.getElementById('newAdminName').value||'').trim();
   const email = (document.getElementById('newAdminEmail').value||'').trim().toLowerCase();
@@ -11933,7 +11952,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260604-v30')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260604-v32')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
