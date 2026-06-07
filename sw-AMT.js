@@ -1,5 +1,5 @@
 // AMT 알림 Service Worker v20260505-v29
-const CACHE = 'amt-v20260604-v33';
+const CACHE = 'amt-v20260604-v34';
 const APP_ROOT = '/AMT';
 const ASSETS = [
   APP_ROOT + '/',

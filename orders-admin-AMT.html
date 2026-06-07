@@ -2326,46 +2326,6 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
     <hr class="divider">
 
     <!-- ═══════════ 법인세 비용 관리 ═══════════ -->
-    <div class="setting-section" id="corpTaxSection">
-      <h3>🏛️ 법인세 비용 관리</h3>
-      <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
-        매월 고정비, 연 1회 비용, AMT 수입비용을 관리합니다. 법인세 예상치 계산에 사용됩니다.<br>
-        <span style="color:var(--text3);font-size:.72rem">※ 입력하지 않은 달은 기본값(작년 평균)으로 자동 계산됨</span>
-      </p>
-
-      <!-- 회사 선택 + 연도 선택 -->
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-        <label style="font-size:.85rem;font-weight:700">회사:</label>
-        <select id="corpTaxCompany" onchange="renderCorpTaxCostsForm()" style="padding:6px 10px;font-size:.88rem;border:1px solid var(--border);border-radius:6px">
-          <option value="AMT">AMT</option>
-          <option value="KY">KY</option>
-          <option value="BEST">BEST</option>
-        </select>
-
-        <label style="font-size:.85rem;font-weight:700;margin-left:10px">연도:</label>
-        <select id="corpTaxYear" onchange="renderCorpTaxCostsForm()" style="padding:6px 10px;font-size:.88rem;border:1px solid var(--border);border-radius:6px">
-        </select>
-
-        <button class="btn btn-success btn-sm" onclick="saveCorpTaxCosts()" style="margin-left:auto">💾 저장</button>
-      </div>
-
-      <!-- 월별 고정비 입력 영역 -->
-      <div id="monthlyCostsBox" style="background:#f9fafb;padding:12px;border-radius:8px;margin-bottom:14px;border:1px solid var(--border)">
-        <!-- JavaScript로 렌더링 -->
-      </div>
-
-      <!-- 연간 1회 비용 입력 영역 -->
-      <div id="yearlyCostsBox" style="background:#fff7ed;padding:12px;border-radius:8px;margin-bottom:14px;border:1px solid #fed7aa">
-        <!-- JavaScript로 렌더링 -->
-      </div>
-
-      <!-- AMT 수입비용 (총괄 전용) -->
-      <div id="importCostsBox" style="background:#eff6ff;padding:12px;border-radius:8px;border:1px solid #bfdbfe;display:none">
-        <!-- JavaScript로 렌더링 - 총괄만 -->
-      </div>
-
-      <div id="corpTaxCostsMsg" style="margin-top:10px;font-size:.78rem"></div>
-    </div>
   </div>
 </div>
 
@@ -8257,99 +8217,50 @@ function calcImportCostsForPeriod(startYm, endYm){
 */
 function calcCorpTaxByCompany(startYm, endYm){
   const inPeriod = ds => ds >= startYm && ds <= endYm+'-31';
-  const supplyOf = total => Math.round(total*10/11); // VAT 포함 → 공급가액
 
-  // ===== KY 매출 (VAT 포함 → 공급가액) =====
-  const kyOrdersInP = orders.filter(o => inPeriod(ym(o.orderDate)));
-  let kyRevenueTotal = kyOrdersInP.reduce((s,o)=>s+orderAmount(o),0);
-
-  // ===== AMT 매출 (internalTrades, VAT 포함 → 공급가액) =====
-  const amtIntTrades = (typeof internalTrades !== 'undefined' ? internalTrades : []).filter(t =>
-    inPeriod(ym(t.date))
-  );
-  let amtRevenueTotal = amtIntTrades.reduce((s,t)=>s+(Number(t.total)||0),0);
-
-  // ===== bestReturns 분류 (반품 처리, 부가세 계산과 동일) =====
-  let kyReturnAmt = 0;       // KY → AMT 반품 (KY 매출 차감)
-  let amtReturnAmt = 0;      // AMT → BEST 반품 (AMT 매출 차감, BEST 매입 발생)
-  let bestPurchaseAmt = 0;   // BEST 매입 합계 (반품 수령)
-
-  (typeof bestReturns !== 'undefined' ? bestReturns : []).forEach(r => {
-    const ft = r.fromType || (r.from==='AMT' ? 'AMT_to_BEST' : r.from==='KY' ? 'KY_to_BEST' : '');
-    const d = r.date || r.createdAt || '';
-    if(!inPeriod(ym(d))) return;
-    const amt = Number(r.total)||0;
-    if(ft === 'KY_to_AMT'){
-      kyReturnAmt += amt;
-    } else if(ft === 'AMT_to_BEST'){
-      amtReturnAmt += amt;
-      bestPurchaseAmt += amt;
-    } else if(ft === 'KY_to_BEST'){
-      kyReturnAmt += amt;
-      bestPurchaseAmt += amt;
+  // ── KBPush 월별 정산값 합산 (기간 내, 저장된 월만) ──
+  let kbRent=0, kbWKy=0, kbWAmt=0, kbWBest=0;
+  const taxData = (typeof window!=='undefined' && window._taxData) ? window._taxData : {};
+  Object.keys(taxData).forEach(k => {
+    if(k >= startYm && k <= endYm){
+      const d = taxData[k] || {};
+      kbRent  += Number(d.rentTotal)||0;
+      kbWKy   += Number(d.withdrawalKy)||0;
+      kbWAmt  += Number(d.withdrawalAmt)||0;
+      kbWBest += Number(d.withdrawalBest)||0;
     }
   });
 
-  // 반품 차감 후 매출 (음수 방지)
-  kyRevenueTotal = Math.max(0, kyRevenueTotal - kyReturnAmt);
-  amtRevenueTotal = Math.max(0, amtRevenueTotal - amtReturnAmt);
+  // ── 내부거래 AMT→KY 물품공급 합계 (= AMT 매출 = KY 매입원가) ──
+  const amtToKyTotal = (typeof internalTrades !== 'undefined' ? internalTrades : [])
+    .filter(t => inPeriod(ym(t.date)))
+    .reduce((s,t)=>s+(Number(t.total)||0),0);
 
-  // ===== 공급가액으로 변환 =====
-  const kyRevenueSupply  = supplyOf(kyRevenueTotal);
-  const amtRevenueSupply = supplyOf(amtRevenueTotal);
+  // ── 내부거래 KY→BEST 대금지급/선수금 합계 (무이자대출 제외) = BEST 매출 ──
+  const kyToBestTotal = (typeof txLogs !== 'undefined' ? txLogs : [])
+    .filter(t => t.type==='KY_to_BEST' && inPeriod(ym(t.date)))
+    .reduce((s,t)=>s+(Number(t.amount)||0),0);
 
-  // ===== 매출원가 =====
-  // KY 매출원가 = AMT가 KY에 공급한 금액 (internalTrades 합계의 공급가액)
-  // (KY가 AMT로부터 산 가격이 KY의 매출원가)
-  const kyCogsTotal = amtIntTrades.reduce((s,t)=>s+(Number(t.total)||0),0);
-  const kyCogsSupply = supplyOf(kyCogsTotal);
+  // ── 영업이익 (과세표준) ──
+  // KY  : 입금 − KY출금 − AMT매입(KBPush KY출금엔 AMT 매입대금이 빠져있어 별도 차감)
+  const kyProfit   = kbRent - kbWKy - amtToKyTotal;
+  // AMT : AMT→KY 매출 − AMT출금
+  const amtProfit  = amtToKyTotal - kbWAmt;
+  // BEST: KY→BEST 대금회수 − BEST출금
+  const bestProfit = kyToBestTotal - kbWBest;
 
-  // AMT 매출원가 = 수입비용 (총괄 입력, VAT 별도 가정 → 공급가액으로 봄)
-  const amtImportCost = calcImportCostsForPeriod(startYm, endYm);
-
-  // BEST 매출원가 = 0 (매출 없음)
-  // BEST 비용 = 받은 반품 금액의 공급가액 (재고 매입 = 비용 처리)
-  const bestPurchaseSupply = supplyOf(bestPurchaseAmt);
-
-  // ===== 고정비 =====
-  const amtFixed = calcFixedCostsForPeriod('AMT', startYm, endYm);
-  const kyFixed = calcFixedCostsForPeriod('KY', startYm, endYm);
-  const bestFixed = calcFixedCostsForPeriod('BEST', startYm, endYm);
-
-  // ===== 영업이익 =====
-  const amtProfit = amtRevenueSupply - amtImportCost - amtFixed;
-  const kyProfit = kyRevenueSupply - kyCogsSupply - kyFixed;
-  // BEST는 매출 0이고, 받은 반품(매입)+고정비가 모두 비용 → 항상 적자
-  const bestProfit = 0 - bestPurchaseSupply - bestFixed;
-
-  // ===== 법인세 (과세표준 양수일 때만, 9.9%) =====
-  const calcTax = (profit) => profit > 0 ? Math.round(profit * 0.099) : 0;
+  // ── 법인세 누진 (과세표준 2억 이하 10%, 초과분 20%) ──
+  const calcTax = (profit) => {
+    if(profit <= 0) return 0;
+    const TIER = 200000000; // 2억
+    if(profit <= TIER) return Math.round(profit * 0.10);
+    return Math.round(TIER * 0.10 + (profit - TIER) * 0.20);
+  };
 
   return {
-    AMT: {
-      revenue: amtRevenueSupply,
-      cogs: amtImportCost,
-      returnAmt: amtReturnAmt,    // 반품 차감 표시용
-      fixedCost: amtFixed,
-      profit: amtProfit,
-      tax: calcTax(amtProfit),
-    },
-    KY: {
-      revenue: kyRevenueSupply,
-      cogs: kyCogsSupply,
-      returnAmt: kyReturnAmt,     // 반품 차감 표시용
-      fixedCost: kyFixed,
-      profit: kyProfit,
-      tax: calcTax(kyProfit),
-    },
-    BEST: {
-      revenue: 0,
-      cogs: bestPurchaseSupply,   // 받은 반품 = 매입(비용)
-      returnAmt: 0,
-      fixedCost: bestFixed,
-      profit: bestProfit,
-      tax: calcTax(bestProfit),   // 항상 0 (적자)
-    },
+    AMT:  { revenue: amtToKyTotal,  cost: kbWAmt,               profit: amtProfit,  tax: calcTax(amtProfit) },
+    KY:   { revenue: kbRent,        cost: kbWKy + amtToKyTotal, profit: kyProfit,   tax: calcTax(kyProfit) },
+    BEST: { revenue: kyToBestTotal, cost: kbWBest,              profit: bestProfit, tax: calcTax(bestProfit) },
   };
 }
 
@@ -8364,6 +8275,7 @@ function renderCorpTaxKpiCards(){
     {key:'KY',   color:'var(--ky)',   bg:'var(--ky-bg)',   label:'KY'},
     {key:'BEST', color:'var(--best)', bg:'var(--best-bg)', label:'BEST'},
   ];
+  const rateLabel = (p) => p<=0 ? '' : (p<=200000000 ? '10%' : '2억까지 10% + 초과분 20%');
 
   return `
     <div class="kpi" style="--kpi-color:${urgentColor};grid-column:1/-1;background:${urgentBg};border-color:${urgentColor}30">
@@ -8373,6 +8285,7 @@ function renderCorpTaxKpiCards(){
         <span style="font-size:.75rem;font-weight:600;color:var(--text2)">📅 신고마감 <b style="color:${urgentColor}">${dueDate}</b></span>
         <span style="font-size:.75rem;font-weight:600;color:${urgentColor}">⏰ D${diffDays>=0?'-'+diffDays:'+'+Math.abs(diffDays)}</span>
       </div>
+      <div style="font-size:.66rem;color:var(--text3);margin-top:4px">※ KBPush 정산값이 저장된 달만 합산됩니다(누락된 달은 0).</div>
     </div>
     ${companies.map(c=>{
       const d = taxData[c.key];
@@ -8382,17 +8295,11 @@ function renderCorpTaxKpiCards(){
         <div class="kpi-value" style="font-size:1.05rem;color:${profitColor}">${fmt(d.tax)}</div>
         <div class="kpi-sub">
           ${d.profit >= 0
-            ? `과세표준 ${fmt(d.profit)}원 × 9.9%`
+            ? `과세표준 ${fmt(d.profit)}원 (${rateLabel(d.profit)})`
             : `<span style="color:#dc2626">결손 ${fmt(Math.abs(d.profit))}원 (법인세 0원)</span>`}
         </div>
-        ${d.returnAmt>0 ? `
-        <div style="font-size:.7rem;color:#dc2626;margin-top:2px">
-          ↩️ 반품 차감 -${fmt(d.returnAmt)}원
-        </div>` : ''}
         <div style="font-size:.68rem;color:var(--text3);margin-top:2px">
-          ${c.key==='BEST'
-            ? `매입(반품수령) ${fmt(d.cogs)}원 · 고정비 ${fmt(d.fixedCost)}원`
-            : `매출 ${fmt(d.revenue)}원 · 원가 ${fmt(d.cogs)}원 · 고정비 ${fmt(d.fixedCost)}원`}
+          매출 ${fmt(d.revenue)}원 · 비용 ${fmt(d.cost)}원
         </div>
       </div>`;
     }).join('')}
@@ -8902,10 +8809,6 @@ function nav(btn){
     // ★ 대리점 코드 목록도 자동 로드
     if(typeof loadDealerCodes === 'function'){
       try { loadDealerCodes(); } catch(e) { console.warn('대리점 목록 로드 실패:', e); }
-    }
-    // ★ 법인세 비용 입력 폼 렌더링
-    if(typeof renderCorpTaxCostsForm === 'function'){
-      try { renderCorpTaxCostsForm(); } catch(e) { console.warn('법인세 비용 폼 로드 실패:', e); }
     }
   }
   // ★ 이력조회 탭 진입 시 자동 로드
@@ -11984,7 +11887,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260604-v33')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260604-v34')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
