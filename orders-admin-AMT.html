@@ -90,6 +90,38 @@
     signInWithEmailAndPassword,
     fetchSignInMethodsForEmail
   };
+
+  // ───────── amt-tax (KBPush 월별 정산) 보조 연결 — 읽기 전용 ─────────
+  // KBPushFilter가 저장한 월별 입출금 정산값을 읽어 법인세 계산에 사용한다.
+  // 기존 amt-ky(메인) 연결·동기화와 완전히 별개이며, 메인에는 일절 영향 없음.
+  // 비밀번호를 넣지 않고 '읽기 공개' 규칙으로 읽기만 한다(쓰기는 KBPushFilter만).
+  const AMT_TAX_CFG = {
+    apiKey: "AIzaSyD6kmefRjjORwWBIyDl1n105bGG7rJf8iQ",
+    authDomain: "amt-tax.firebaseapp.com",
+    databaseURL: "https://amt-tax-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "amt-tax"
+  };
+  window._taxData = {};      // { "2026-05": {rentTotal, withdrawalKy, withdrawalAmt, withdrawalBest, ...}, ... }
+  window._taxReady = false;
+  (function initTaxApp(){
+    try {
+      const taxAppName = 'amt-tax';
+      const taxApp = getApps().find(a => a.name === taxAppName)
+        || _initSecondaryApp(AMT_TAX_CFG, taxAppName);
+      const taxDb = getDatabase(taxApp);
+      onValue(ref(taxDb, 'kbpush_settlements'), (snap) => {
+        window._taxData = snap.val() || {};
+        window._taxReady = true;
+        console.log('[amt-tax] 정산 데이터 로드:', Object.keys(window._taxData));
+        // 세금 화면이 열려 있으면 자동 갱신 (3단계에서 함수 연결)
+        if(typeof window.onTaxDataUpdated === 'function') window.onTaxDataUpdated();
+      }, (err) => {
+        console.warn('[amt-tax] 정산 읽기 실패:', err.message);
+      });
+    } catch(e){
+      console.warn('[amt-tax] 초기화 실패:', e.message);
+    }
+  })();
 </script>
 
 <style>
@@ -11952,7 +11984,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260604-v32')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260604-v33')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
