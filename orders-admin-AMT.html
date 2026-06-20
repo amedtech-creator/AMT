@@ -591,7 +591,15 @@ tbody td{padding:9px 12px;vertical-align:middle;font-weight:600;}
 
 /* ═══ RESPONSIVE ═══ */
 @media(max-width:640px){
-  .header{padding:0 12px;height:52px;}
+  /* 헤더: 높이 고정 해제 → 버튼이 안 잘리고 다 보이게 / static → 상태바 안 겹침 */
+  .header{padding:6px 12px;height:auto;min-height:52px;position:static;}
+  .nav{top:0;} /* 탭 메뉴는 화면 맨 위 고정 유지 (겹침 방지) */
+  .header-right{gap:5px;justify-content:flex-end;}
+  .logo-text{font-size:.92rem;}
+  .logo-icon{width:28px;height:28px;}
+  .header-right .admin-name-chip{font-size:.64rem;padding:3px 7px;}
+  .header-right .sync-badge{font-size:.64rem;padding:3px 7px;}
+  .header-right .btn-sm{padding:4px 8px;font-size:.68rem;}
   .main{padding:10px;}
   .card{padding:14px;}
   .kpi-grid{grid-template-columns:repeat(2,1fr);}
@@ -11887,7 +11895,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260604-v34')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260620-v35')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
