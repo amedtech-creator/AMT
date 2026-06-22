@@ -2315,6 +2315,20 @@ async function sendStatementOnAmtOrderGroup(groupOrder, dealer, includeDeliveryF
     </div>
     </div>
 
+    <div id="internalPriceSection" style="display:none">
+    <hr class="divider">
+    <div class="setting-section">
+      <h3>🔄 내부거래 단가 (AMT→KY 물품공급) <span style="font-size:.72rem;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px;margin-left:6px">총괄/OTP</span></h3>
+      <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
+        AMT가 KY에 공급하는 단가입니다. 물품공급 입력과 AMT→KY 세금계산서에 자동 반영됩니다.<br>
+        <span style="color:var(--text3);font-size:.72rem">※ 일반관리자는 저장 시 총괄 OTP 인증이 필요합니다. 단가는 모든 기기에 공유됩니다.</span>
+      </p>
+      <div id="internalPriceList">
+        <div style="font-size:.8rem;color:var(--text3)">제품을 불러오는 중...</div>
+      </div>
+    </div>
+    </div>
+
       <hr class="divider">
       <h3>📋 수금조건 코드 안내</h3>
       <div class="table-wrap">
@@ -2847,7 +2861,7 @@ let bestReturns = [];   // BEST 반품 이력
 let kyReturns = [];     // KY→AMT 반품 이력
 let products = ['JUC','MEDIAS','DELL']; // 전역 제품목록
 // AMT→KY 내부거래 단가 (수정가능, localStorage 저장)
-let internalPrices = {JUC:20000, MEDIAS:1100, DELL:800};
+let internalPrices = {JUC:26000, MEDIAS:1100, DELL:800};
 const LS_INT_PRICES = 'amt2_int_prices';
 let curInvCompany = 'AMT'; // 현재 재고 회사
 
@@ -2930,6 +2944,7 @@ function saveLS(){
   localStorage.setItem(LS_BEST,JSON.stringify(bestReturns));
   localStorage.setItem(LS_KY_RET,JSON.stringify(kyReturns));
   if(isSuperAdmin()) localStorage.setItem('amt_importPrices',JSON.stringify(importPrices));
+  localStorage.setItem(LS_INT_PRICES, JSON.stringify(internalPrices));
 }
 
 /* ═══ 기본 대리점 데이터 ═══ */
@@ -5428,7 +5443,7 @@ function txTypeLabel(type){
 }
 
 // AMT→KY 물품공급 단가 설정
-const KY_SUPPLY_DEFAULT_PRICES = {JUC:20000, MEDIAS:1100, DELL:800};
+const KY_SUPPLY_DEFAULT_PRICES = {JUC:26000, MEDIAS:1100, DELL:800};
 
 function kySupplyOnProduct(){
   const prod = document.getElementById('kySupplyProduct').value;
@@ -7312,6 +7327,15 @@ function _mergeImportPrices(remote){
   });
 }
 
+// internalPrices(내부거래 단가)도 importPrices와 동일하게 병합
+function _mergeInternalPrices(remote){
+  if(typeof internalPrices === 'undefined') return;
+  if(!remote || typeof remote !== 'object') return;
+  Object.keys(remote).forEach(k => {
+    if(!(k in internalPrices)) internalPrices[k] = remote[k];
+  });
+}
+
 // ★ 통합 병합: 원격 전체 스냅샷을 로컬과 합침
 function _mergeRemoteAll(remote){
   if(!remote || typeof remote !== 'object') return;
@@ -7362,6 +7386,7 @@ function _mergeRemoteAll(remote){
 
   _mergeStringArr(products, remote.products);
   _mergeImportPrices(remote.importPrices);
+  _mergeInternalPrices(remote.internalPrices);
   // ★ merge 후에는 stamp 없이 바로 localStorage 저장 (_v를 원본 그대로 유지)
   _saveLSRaw();
   // ★ merge 이후 prevSnap을 현재 상태로 재설정 (병합된 원격 데이터를 다음 변경 감지의 기준으로)
@@ -7436,6 +7461,7 @@ async function fbSaveAll(){
       orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs,
       bestReturns, kyReturns,
       importPrices: (typeof importPrices !== 'undefined' ? importPrices : {}),
+      internalPrices: (typeof internalPrices !== 'undefined' ? internalPrices : {}),
       tombstones,  // ★ 삭제 기록 - 다른 PC도 이걸 보고 삭제 반영
       _updatedAt: now
     };
@@ -8810,6 +8836,7 @@ function nav(btn){
   // 설정 탭 진입 시 자동 로드
   if(page==='settings'){
     renderImportPriceSection();
+    try { renderInternalPriceSection(); } catch(e){ console.warn('내부거래 단가 폼 로드 실패:', e); }
     // ★ 관리자 목록 자동 로드 (수동 클릭 불필요)
     if(typeof loadAdminCodes === 'function'){
       loadAdminCodes().catch(e => console.warn('관리자 목록 로드 실패:', e));
@@ -8881,7 +8908,7 @@ async function uploadWithKey(key){
   const fb = window._fb;
   if(!fb||!fb.ready) return;
   const now = new Date().toISOString();
-  const payload={ orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs, bestReturns, kyReturns, importPrices:(typeof importPrices!=='undefined'?importPrices:{}), _updatedAt:now };
+  const payload={ orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs, bestReturns, kyReturns, importPrices:(typeof importPrices!=='undefined'?importPrices:{}), internalPrices:(typeof internalPrices!=='undefined'?internalPrices:{}), _updatedAt:now };
   await fb.set(fb.ref(fb.db,'amt_pw/'+key), payload);
 }
 
@@ -10860,6 +10887,38 @@ function saveAllImportPrices(){
   toast('수입가격 전체 저장 완료', 'success');
 }
 
+// ── 내부거래 단가(AMT→KY 물품공급) 설정 (총괄/OTP) ──
+function renderInternalPriceSection(){
+  const section = document.getElementById('internalPriceSection');
+  if(!section) return;
+  section.style.display='block'; // 총괄+일반관리자 모두 표시 (저장 시 OTP로 제어)
+  const wrap = document.getElementById('internalPriceList');
+  if(!wrap) return;
+  const prods = products.length ? products : ['JUC','MEDIAS','DELL'];
+  wrap.innerHTML = prods.map(p => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-weight:700;min-width:80px">${escapeHtml(p)}</span>
+      <input type="number" id="intp_${escapeHtml(p)}" placeholder="공급단가(원)"
+        value="${internalPrices[p]||''}"
+        style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:.88rem">
+      <button class="btn btn-primary btn-sm" onclick="saveInternalPrice(${jsAttr(p)})">저장</button>
+    </div>
+  `).join('');
+}
+
+function saveInternalPrice(prod){
+  if(!_lockSave('saveInternalPrice_'+prod)) return; // 더블클릭 방지
+  const el = document.getElementById('intp_'+prod);
+  if(!el){ return; }
+  const val = parseFloat(el.value)||0;
+  if(val<=0){ toast('단가를 올바르게 입력하세요','error'); return; }
+  requireOtp(`내부거래 단가 수정 (${prod} ${fmt(val)}원)`, async () => {
+    internalPrices[prod] = val;
+    saveLS(); fbSaveAll();
+    toast(prod + ' 내부거래 단가 저장: ' + fmt(val) + '원', 'success');
+  });
+}
+
 // VAT 계산 시 수입가격 반영 (매입세액)
 function calcImportVat(startYm, endYm){
   if(!Object.keys(importPrices).length) return 0;
@@ -11895,7 +11954,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260620-v35')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260620-v36')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
