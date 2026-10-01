@@ -2863,6 +2863,12 @@ let products = ['JUC','MEDIAS','DELL']; // 전역 제품목록
 // AMT→KY 내부거래 단가 (수정가능, localStorage 저장)
 let internalPrices = {JUC:26000, MEDIAS:1100, DELL:800};
 const LS_INT_PRICES = 'amt2_int_prices';
+// ★ 단가 동기화용 버전(마지막 수정 시각). 숫자가 큰 쪽(=나중에 고친 쪽)이 이김.
+//    이게 없으면 기기마다 단가가 제각각으로 남는다.
+let internalPricesV = 0;
+let importPricesV   = 0;
+const LS_INT_PRICES_V = 'amt2_int_prices_v';
+const LS_IMP_PRICES_V = 'amt_importPrices_v';
 let curInvCompany = 'AMT'; // 현재 재고 회사
 
 const LS_DEALERS = 'amt2_dealers';
@@ -2890,6 +2896,8 @@ function loadLS(){
     const p=JSON.parse(localStorage.getItem(LS_PRODS)||'null');
     const ip=JSON.parse(localStorage.getItem(LS_INT_PRICES)||'null'); if(ip) internalPrices=ip;
     const impP=JSON.parse(localStorage.getItem('amt_importPrices')||'null'); if(impP) importPrices=impP;
+    internalPricesV = Number(localStorage.getItem(LS_INT_PRICES_V))||0;
+    importPricesV   = Number(localStorage.getItem(LS_IMP_PRICES_V))||0;
     if(p) products=p;
     // 기존 invLogs에 company 없으면 AMT로 기본설정
     invLogs.forEach(i=>{ if(!i.company) i.company='AMT'; });
@@ -2945,6 +2953,8 @@ function saveLS(){
   localStorage.setItem(LS_KY_RET,JSON.stringify(kyReturns));
   if(isSuperAdmin()) localStorage.setItem('amt_importPrices',JSON.stringify(importPrices));
   localStorage.setItem(LS_INT_PRICES, JSON.stringify(internalPrices));
+  localStorage.setItem(LS_INT_PRICES_V, String(internalPricesV||0));
+  localStorage.setItem(LS_IMP_PRICES_V, String(importPricesV||0));
 }
 
 /* ═══ 기본 대리점 데이터 ═══ */
@@ -5492,7 +5502,9 @@ async function saveKySupply(){
   // internalPrices 업데이트 (사용자가 단가 수정한 경우)
   if(price !== internalPrices[prod]){
     internalPrices[prod] = price;
+    internalPricesV = Date.now();   // ★ 수정 시각 기록
     localStorage.setItem(LS_INT_PRICES, JSON.stringify(internalPrices));
+    localStorage.setItem(LS_INT_PRICES_V, String(internalPricesV));
   }
 
   const id = 'it_'+Date.now();
@@ -5901,7 +5913,9 @@ async function _doSaveTxEdit(editId){
     addAuditLog('edit','채권채무',`거래수정: AMT→KY ${oldProduct} ${fmt(oldQty)}개 → ${newProduct} ${fmt(newQty)}개 (날짜:${oldDate}→${newDate})`);
     t.date=newDate; t.amount=newTotal; t.memo=newProduct+' '+fmt(newQty)+'개'+(newMemo?' ('+newMemo+')':'');
     internalPrices[newProduct]=newPrice;
+    internalPricesV = Date.now();   // ★ 수정 시각 기록
     localStorage.setItem(LS_INT_PRICES, JSON.stringify(internalPrices));
+    localStorage.setItem(LS_INT_PRICES_V, String(internalPricesV));
 
   // ── 일반 거래 (txLogs만) ──
   } else {
@@ -7317,23 +7331,37 @@ function _mergeStringArr(localArr, remoteArr){
   remoteArr.forEach(x => { if(x && !set.has(x)){ set.add(x); localArr.push(x); } });
 }
 
-// importPrices는 object → 병합 (서버 값 기반 + 로컬 덮어쓰기)
-function _mergeImportPrices(remote){
-  if(typeof importPrices === 'undefined') return;
-  if(!remote || typeof remote !== 'object') return;
-  // 로컬이 우선이지만 서버에만 있는 키는 로컬에 흡수
-  Object.keys(remote).forEach(k => {
-    if(!(k in importPrices)) importPrices[k] = remote[k];
+// ★ 단가 객체 공통 병합 — "나중에 고친 쪽이 이긴다"
+//   [이전 버그] 로컬에 없는 키만 가져왔기 때문에, JUC/MEDIAS/DELL처럼
+//   처음부터 기본값이 들어있는 항목은 다른 기기에서 아무리 고쳐도 절대 반영되지 않았음.
+//   이제 수정 시각(버전)을 비교해서 더 최신인 쪽 값을 채택한다.
+//   반환값 = 채택된 버전 번호
+function _mergePriceObj(localObj, localV, remoteObj, remoteV){
+  if(!remoteObj || typeof remoteObj !== 'object') return Number(localV)||0;
+  const rv = Number(remoteV)||0;
+  const lv = Number(localV)||0;
+  if(rv > lv){
+    // 원격이 더 최신 → 원격 값으로 덮어씀 (원격에 없는 로컬 키는 그대로 유지)
+    Object.keys(remoteObj).forEach(k => { localObj[k] = remoteObj[k]; });
+    return rv;
+  }
+  // 로컬이 더 최신이거나 같음 → 원격에만 있는 새 항목만 흡수
+  Object.keys(remoteObj).forEach(k => {
+    if(!(k in localObj)) localObj[k] = remoteObj[k];
   });
+  return lv;
 }
 
-// internalPrices(내부거래 단가)도 importPrices와 동일하게 병합
-function _mergeInternalPrices(remote){
+// importPrices(수입가격) 병합
+function _mergeImportPrices(remote, remoteV){
+  if(typeof importPrices === 'undefined') return;
+  importPricesV = _mergePriceObj(importPrices, importPricesV, remote, remoteV);
+}
+
+// internalPrices(내부거래 단가) 병합
+function _mergeInternalPrices(remote, remoteV){
   if(typeof internalPrices === 'undefined') return;
-  if(!remote || typeof remote !== 'object') return;
-  Object.keys(remote).forEach(k => {
-    if(!(k in internalPrices)) internalPrices[k] = remote[k];
-  });
+  internalPricesV = _mergePriceObj(internalPrices, internalPricesV, remote, remoteV);
 }
 
 // ★ 통합 병합: 원격 전체 스냅샷을 로컬과 합침
@@ -7385,8 +7413,8 @@ function _mergeRemoteAll(remote){
   }
 
   _mergeStringArr(products, remote.products);
-  _mergeImportPrices(remote.importPrices);
-  _mergeInternalPrices(remote.internalPrices);
+  _mergeImportPrices(remote.importPrices, remote.importPricesV);
+  _mergeInternalPrices(remote.internalPrices, remote.internalPricesV);
   // ★ merge 후에는 stamp 없이 바로 localStorage 저장 (_v를 원본 그대로 유지)
   _saveLSRaw();
   // ★ merge 이후 prevSnap을 현재 상태로 재설정 (병합된 원격 데이터를 다음 변경 감지의 기준으로)
@@ -7408,6 +7436,9 @@ function _saveLSRaw(){
   localStorage.setItem(LS_BEST,JSON.stringify(bestReturns));
   localStorage.setItem(LS_KY_RET,JSON.stringify(kyReturns));
   if(isSuperAdmin()) localStorage.setItem('amt_importPrices',JSON.stringify(importPrices));
+  localStorage.setItem(LS_INT_PRICES, JSON.stringify(internalPrices));
+  localStorage.setItem(LS_INT_PRICES_V, String(internalPricesV||0));
+  localStorage.setItem(LS_IMP_PRICES_V, String(importPricesV||0));
 }
 
 // merge 후에 _prevSnap을 현재 상태로 재설정
@@ -7462,6 +7493,8 @@ async function fbSaveAll(){
       bestReturns, kyReturns,
       importPrices: (typeof importPrices !== 'undefined' ? importPrices : {}),
       internalPrices: (typeof internalPrices !== 'undefined' ? internalPrices : {}),
+      importPricesV: (typeof importPricesV !== 'undefined' ? (importPricesV||0) : 0),
+      internalPricesV: (typeof internalPricesV !== 'undefined' ? (internalPricesV||0) : 0),
       tombstones,  // ★ 삭제 기록 - 다른 PC도 이걸 보고 삭제 반영
       _updatedAt: now
     };
@@ -8926,7 +8959,7 @@ async function uploadWithKey(key){
   const fb = window._fb;
   if(!fb||!fb.ready) return;
   const now = new Date().toISOString();
-  const payload={ orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs, bestReturns, kyReturns, importPrices:(typeof importPrices!=='undefined'?importPrices:{}), internalPrices:(typeof internalPrices!=='undefined'?internalPrices:{}), _updatedAt:now };
+  const payload={ orders, invLogs, dealers, products, internalTrades, auditLogs, txLogs, bestReturns, kyReturns, importPrices:(typeof importPrices!=='undefined'?importPrices:{}), internalPrices:(typeof internalPrices!=='undefined'?internalPrices:{}), importPricesV:(typeof importPricesV!=='undefined'?(importPricesV||0):0), internalPricesV:(typeof internalPricesV!=='undefined'?(internalPricesV||0):0), _updatedAt:now };
   await fb.set(fb.ref(fb.db,'amt_pw/'+key), payload);
 }
 
@@ -8941,6 +8974,9 @@ function _applyPwRemote(remote){
   if(remote.auditLogs) auditLogs=remote.auditLogs;
   if(remote.txLogs) txLogs=remote.txLogs;
   if(remote.bestReturns) bestReturns=remote.bestReturns;
+  // ★ 단가도 함께 반영 (이전에는 아예 빠져 있어서 비밀번호 동기화로도 단가가 안 옮겨졌음)
+  _mergeImportPrices(remote.importPrices, remote.importPricesV);
+  _mergeInternalPrices(remote.internalPrices, remote.internalPricesV);
   const now=remote._updatedAt||new Date().toISOString();
   localStorage.setItem('amt_updatedAt', now);
   saveLS();
@@ -10891,6 +10927,7 @@ function renderImportPriceSection(){
 function saveImportPrice(prod){
   const val = parseFloat(document.getElementById('ip_'+prod).value)||0;
   importPrices[prod] = val;
+  importPricesV = Date.now();   // ★ 수정 시각 기록
   saveLS(); fbSaveAll();
   toast(prod + ' 수입가격 저장: ' + fmt(val) + '원', 'success');
 }
@@ -10901,6 +10938,7 @@ function saveAllImportPrices(){
     const el = document.getElementById('ip_'+p);
     if(el) importPrices[p] = parseFloat(el.value)||0;
   });
+  importPricesV = Date.now();   // ★ 수정 시각 기록
   saveLS(); fbSaveAll();
   toast('수입가격 전체 저장 완료', 'success');
 }
@@ -10932,6 +10970,7 @@ function saveInternalPrice(prod){
   if(val<=0){ toast('단가를 올바르게 입력하세요','error'); return; }
   requireOtp(`내부거래 단가 수정 (${prod} ${fmt(val)}원)`, async () => {
     internalPrices[prod] = val;
+    internalPricesV = Date.now();   // ★ 수정 시각 기록 → 다른 기기가 이 값을 받아감
     saveLS(); fbSaveAll();
     toast(prod + ' 내부거래 단가 저장: ' + fmt(val) + '원', 'success');
   });
@@ -11972,7 +12011,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20260831-v37')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20261001-v38')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
