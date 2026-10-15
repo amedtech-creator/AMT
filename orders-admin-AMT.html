@@ -10089,8 +10089,14 @@ function kyOpenAction(orderId, targetStatus){
     if(dealerFee > 0 || orderHasFee){
       // ★ 서정메디케어/엔케이바이오/베스트메디아는 빨간색 강조 + 무조건 기본 체크
       const isHighlight = isFeeHighlightDealer(o.dealerName);
-      // 기본값: 3개 대리점이면 무조건 체크, 그 외엔 발주 시 fee를 넣었으면 체크
-      const defaultChecked = (isHighlight || orderHasFee) ? 'checked' : '';
+      // 기본값: 대리점이 KY앱 주문 시 택배비 포함을 선택했으면 그 값 우선 (관리자가 변경 가능)
+      //         선택 기록이 없으면 기존 규칙(3개 대리점 무조건 체크 / 발주 시 fee 입력분)
+      const dealerChose = (o.feeInclude !== undefined && o.feeInclude !== null);
+      const defaultChecked = (dealerChose ? !!o.feeInclude : (isHighlight || orderHasFee)) ? 'checked' : '';
+      const dealerChoiceMsg = dealerChose
+        ? `<div style="font-size:.74rem;margin-top:6px;padding:6px 10px;border-radius:6px;background:${o.feeInclude?'#dcfce7':'#f3f4f6'};color:${o.feeInclude?'#166534':'#4b5563'};font-weight:700">
+             📩 대리점 주문 시 선택: <b>${o.feeInclude?'택배비 포함':'택배비 미포함'}</b>
+           </div>` : '';
       if(isHighlight){
         feeSelectHtml = `
           <div style="background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:14px 16px;margin-bottom:10px;box-shadow:0 0 0 3px rgba(220,38,38,0.1)">
@@ -10102,6 +10108,7 @@ function kyOpenAction(orderId, targetStatus){
               ⚠️ <b>${escapeHtml(o.dealerName||'')}</b> 은(는) 택배비 처리에 주의가 필요합니다<br>
               <span style="font-weight:500">택배비 ${fmt(dealerFee||(o.fee||0))}원 포함 여부를 정확히 확인하세요.</span>
             </div>
+            ${dealerChoiceMsg}
           </div>`;
       } else {
         feeSelectHtml = `
@@ -10113,6 +10120,7 @@ function kyOpenAction(orderId, targetStatus){
             <div style="font-size:.7rem;color:#78350f;margin-top:4px;padding-left:26px">
               체크 해제 시 택배비 없는 명세서가 발송됩니다 (대리점 ${escapeHtml(o.dealerName||'')}: 택배비 ${fmt(dealerFee||(o.fee||0))}원)
             </div>
+            ${dealerChoiceMsg}
           </div>`;
       }
     }
@@ -12045,7 +12053,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20261014-v39')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20261015-v40')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
