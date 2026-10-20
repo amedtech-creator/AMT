@@ -8050,6 +8050,11 @@ function calcVatByCompany(startYm, endYm){
   );
   let amtRevenue = amtIntTrades.reduce((s,t)=>s+(Number(t.total)||0),0);
 
+  // ★ KY 매입액 = AMT가 KY에 공급한 금액 (= AMT 매출과 같은 세금계산서)
+  //   KY는 이 매입분의 세액을 공제받아야 하므로 따로 보관한다.
+  //   AMT→BEST 반품은 KY와 무관한 거래라서 차감 전 금액을 쓴다.
+  const kyPurchaseAmt = amtRevenue;
+
   // === bestReturns 분류 (반품 처리) ===
   let kyReturnAmt = 0;       // KY → AMT 반품 (KY 매출 차감)
   let amtReturnAmt = 0;      // AMT → BEST 반품 (AMT 매출 차감, BEST 매입 발생)
@@ -8106,6 +8111,10 @@ function calcVatByCompany(startYm, endYm){
       supply: supplyAmt(kyRevenue),
       vat: vatAmt(kyRevenue),
       importVat: 0,
+      // ★ AMT에서 매입한 분의 매입세액 — 납부세액에서 공제됨
+      //   (부가세 = 매출세액 - 매입세액. 이전에는 매입세액이 빠져 세금이 과다 표시됐음)
+      purchaseAmt: kyPurchaseAmt,
+      purchaseVat: Math.round(kyPurchaseAmt / 11),
       returnAmt: kyReturnAmt
     },
     BEST: {
@@ -8689,13 +8698,22 @@ function renderVatKpiCards(){
       const isSuper = (typeof isSuperAdmin === 'function') ? isSuperAdmin() : false;
       // 수입매입세액은 총관리자만 차감 반영. 일반 관리자에게는 매출세액만 표시 (수입원가 역산 방지)
       const useImportVat = (c.key==='AMT' && d.importVat>0 && isSuper);
-      const actualVat = useImportVat ? Math.max(0, d.vat - d.importVat) : d.vat;
+      // ★ KY 매입세액 공제 (AMT에서 매입한 분)
+      //   내부거래 금액은 내부거래 탭에서 이미 보이는 값이라 모든 관리자에게 표시한다.
+      const useKyPurchaseVat = (c.key==='KY' && (d.purchaseVat||0) > 0);
+      const actualVat = useImportVat      ? Math.max(0, d.vat - d.importVat)
+                      : useKyPurchaseVat  ? (d.vat - d.purchaseVat)
+                      : d.vat;
       return `<div class="kpi" style="--kpi-color:${c.color};background:${c.bg}">
         <div class="kpi-label" style="color:${c.color}">🧾 ${c.label} ${c.key==='BEST' ? '예상 환급세액' : '예상 납부세액'}</div>
-        <div class="kpi-value" style="font-size:1.05rem;color:${c.key==='BEST' ? '#16a34a' : c.color}">${c.key==='BEST' && actualVat<0 ? '-'+fmt(Math.abs(actualVat)) : fmt(actualVat)}</div>
+        <div class="kpi-value" style="font-size:1.05rem;color:${c.key==='BEST' ? '#16a34a' : c.color}">${actualVat<0 ? '-'+fmt(Math.abs(actualVat)) : fmt(actualVat)}</div>
         ${useImportVat ? `
         <div style="font-size:.74rem;color:var(--text2);margin-top:3px">매출세액 ${fmt(d.vat)}원</div>
         <div style="font-size:.74rem;color:#16a34a;font-weight:600" title="총관리자 전용 표시">🔒 수입매입세액 -${fmt(d.importVat)}원</div>
+        ` : ''}
+        ${useKyPurchaseVat ? `
+        <div style="font-size:.74rem;color:var(--text2);margin-top:3px">매출세액 ${fmt(d.vat)}원</div>
+        <div style="font-size:.74rem;color:#16a34a;font-weight:600">📥 AMT 매입세액 -${fmt(d.purchaseVat)}원</div>
         ` : ''}
         ${c.key==='AMT' && d.returnAmt>0 ? `
         <div style="font-size:.72rem;color:#dc2626;margin-top:2px">↩️ AMT→BEST 반품 -${fmt(d.returnAmt)}원</div>
@@ -8714,6 +8732,7 @@ function renderVatKpiCards(){
         <div style="font-size:.68rem;color:var(--text3);margin-top:2px">${
           c.key==='BEST' ? '※매입세액 환급 (매출 0원)'
           : useImportVat ? '매출세액-수입매입세액(🔒)'
+          : useKyPurchaseVat ? '매출세액 - AMT매입세액'
           : 'VAT포함 매출/11 - 반품/11'
         }</div>
       </div>`;
@@ -12053,7 +12072,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 // PWA Service Worker 등록 (github.io 배포 환경에서만)
 if('serviceWorker' in navigator && location.hostname.endsWith('github.io')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20261015-v40')
+    navigator.serviceWorker.register('/AMT/sw-AMT.js?v=20261020-v41')
       .then(r=>console.log('[AMT SW] 등록 완료:', r.scope))
       .catch(e=>console.log('[AMT SW] 등록 스킵:', e.message));
   });
